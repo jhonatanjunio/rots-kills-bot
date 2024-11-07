@@ -1,0 +1,13 @@
+{
+    "discord": {
+        "token": "",
+        "clientId": "",
+        "guildId": "",
+        "deathLogChannel": "",
+        "monsterDeathLogChannel": "",
+        "playerClassChangeChannel": ""
+    },
+    "game": {
+        "apiUrl": "https://api.saiyansreturn.com/"
+    }
+}
