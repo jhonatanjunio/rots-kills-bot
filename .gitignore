@@ -1,0 +1,9 @@
+/executable
+/dist
+/node_modules
+/config/config.json
+.env
+/database/data.json
+.pkg-cache
+yarn.lock
+package-lock.json

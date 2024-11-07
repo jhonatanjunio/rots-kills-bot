@@ -1,0 +1,21 @@
+{
+  "id": 175606,
+  "name": "TestPlayer",
+  "level": 281,
+  "vocation": {
+    "id": 2,
+    "name": "Vegeta"
+  },
+  "deaths": {
+    "deaths": [
+      {
+        "time": 1730942598,
+        "level": 281,
+        "killed_by": "TestKiller",
+        "is_player": 1,
+        "mostdamage_by": "TestKiller",
+        "mostdamage_is_player": 1
+      }
+    ]
+  }
+}
