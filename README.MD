@@ -137,3 +137,11 @@ Cada um destes destaques técnicos foi implementado pensando em performance, man
 
 
 Este bot é uma ferramenta completa para gerenciamento de guerra no ROTS, oferecendo monitoramento em tempo real, estatísticas detalhadas e uma interface amigável através do Discord. A arquitetura é robusta e bem organizada, com foco em performance e confiabilidade.
+
+
+### TODO
+- [✅] Implementar função que registra mortes por monstros e envia para o canal de log de mortes por monstros
+- [✅] Implementar função que registra troca de classe dos personagens registrados e envia para o canal de log de trocas de classe
+- [✅] Criar função de war. Esta função deve aceitar o prazo no formato (quantidade)(formato). Exemplo: 1d (1 dia), 1w (1 semana), 1m (1 mês), 1y (1 ano).
+  - [✅] Quando a função war for invocada passando o parametro, deve-se criar uma espécie de listagem de frag (KDA) dos personagens aliados.  
+- [ ] Implementar função para importar lista de jogadores

@@ -33,8 +33,20 @@ export function formatNumber(num: number): string {
 export function formatTimestamp(timestamp: number): string {
   if (!timestamp) return 'N/A';
   
-  // Multiplica por 1000 pois o timestamp está em segundos e o moment espera milissegundos
-  return moment(timestamp * 1000)
+  // Verifica se o timestamp está em milissegundos (mais de 13 dígitos)
+  const timestampInMs = timestamp.toString().length > 13 ? 
+    timestamp : // já está em milissegundos
+    timestamp * 1000; // converte de segundos para milissegundos
+  
+  return moment(timestampInMs)
     .tz('America/Sao_Paulo')
     .format('DD/MM/YYYY HH:mm:ss');
+}
+
+export function isFromToday(timestamp: number): boolean {
+  const today = moment().tz('America/Sao_Paulo').startOf('day');
+  const tomorrow = moment().tz('America/Sao_Paulo').startOf('day').add(1, 'day');
+  const deathDate = moment(timestamp * 1000).tz('America/Sao_Paulo');
+  
+  return deathDate.isBetween(today, tomorrow);
 }

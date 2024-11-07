@@ -5,17 +5,23 @@ import { DeathLogEntry } from '../models/Deathlog';
 
 interface DatabaseSchema {
   players: Player[];
-  deathLogs: DeathLogEntry[];
-  deathLogsIndex: Set<string>;
+  playerDeathLogs: DeathLogEntry[];
+  monsterDeathLogs: DeathLogEntry[];
+  playerDeathLogsIndex: Set<string>;
+  monsterDeathLogsIndex: Set<string>;
 }
 
 export class Database {
   private static data: DatabaseSchema = {
     players: [],
-    deathLogs: [],
-    deathLogsIndex: new Set()
+    playerDeathLogs: [],
+    monsterDeathLogs: [],
+    playerDeathLogsIndex: new Set(),
+    monsterDeathLogsIndex: new Set()
   };
   private static readonly DB_PATH = path.join(process.cwd(), 'database', 'data.json');
+  private static readonly PLAYER_DEATHS_PATH = path.join(process.cwd(), 'database', 'playerDeaths.json');
+  private static readonly MONSTER_DB_PATH = path.join(process.cwd(), 'database', 'monsterDeaths.json');
 
   private static createDeathLogHash(deathLog: DeathLogEntry): string {
     return `${deathLog.playerName}-${deathLog.killed_by}-${deathLog.mostdamage_by}-${deathLog.timestamp}-${deathLog.level}`;
@@ -26,32 +32,38 @@ export class Database {
       const content = await fs.readFile(this.DB_PATH, 'utf-8');
       const loadedData = JSON.parse(content);
       this.data.players = loadedData.players;
-      this.data.deathLogs = loadedData.deathLogs;
-      
-      // Reconstrói o índice em memória
-      this.data.deathLogsIndex = new Set(
-        this.data.deathLogs.map(this.createDeathLogHash)
-      );
     } catch {
-      this.data = { 
-        players: [], 
-        deathLogs: [], 
-        deathLogsIndex: new Set() 
-      };
+      this.data.players = [];
       await this.save();
     }
-  }
 
-  private static async save() {
-    // Salva apenas os dados, não o índice
-    const dataToSave = {
-      players: this.data.players,
-      deathLogs: this.data.deathLogs
-    };
-    await fs.writeFile(this.DB_PATH, JSON.stringify(dataToSave, null, 2));
-  }
+    try {
+      const content = await fs.readFile(this.PLAYER_DEATHS_PATH, 'utf-8');
+      const loadedData = JSON.parse(content);
+      this.data.playerDeathLogs = loadedData.playerDeathLogs;
+      this.data.playerDeathLogsIndex = new Set(
+        this.data.playerDeathLogs.map(this.createDeathLogHash)
+      );
+    } catch {
+      this.data.playerDeathLogs = [];
+      this.data.playerDeathLogsIndex = new Set();
+      await this.savePlayerDeaths();
+    }
 
-  // Métodos para Players
+    try {
+      const content = await fs.readFile(this.MONSTER_DB_PATH, 'utf-8');
+      const loadedData = JSON.parse(content);
+      this.data.monsterDeathLogs = loadedData.monsterDeathLogs;
+      this.data.monsterDeathLogsIndex = new Set(
+        this.data.monsterDeathLogs.map(this.createDeathLogHash)
+      );
+    } catch {
+      this.data.monsterDeathLogs = [];
+      this.data.monsterDeathLogsIndex = new Set();
+      await this.saveMonsterDeaths();
+    }
+  }
+  
   static async addPlayer(player: Player) {
     this.data.players.push(player);
     await this.save();
@@ -69,25 +81,61 @@ export class Database {
     }
   }
 
-  // Métodos para DeathLogs
-  static async addDeathLog(deathLog: DeathLogEntry): Promise<boolean> {
-    try {
-        console.log('Tentando adicionar death log:');
-        const hash = this.createDeathLogHash(deathLog);
-        
-        if (this.data.deathLogsIndex.has(hash)) {
-            console.log('Death log duplicado encontrado');
-            return false;
-        }
+  static async removePlayer(playerId: number) {
+    this.data.players = this.data.players.filter(p => p.id != playerId);
+    await this.save();
+  }
 
-        this.data.deathLogs.push(deathLog);
-        this.data.deathLogsIndex.add(hash);
-        await this.save();
-        console.log('Death log adicionado com sucesso');
-        return true;
-    } catch (error) {
-        console.error('Erro ao adicionar death log:', error);
+  private static async save() {
+    const dataToSave = {
+      players: this.data.players
+    };
+    await fs.writeFile(this.DB_PATH, JSON.stringify(dataToSave, null, 2));
+  }
+
+  private static async savePlayerDeaths() {
+    const dataToSave = {
+      playerDeathLogs: this.data.playerDeathLogs
+    };
+    await fs.writeFile(this.PLAYER_DEATHS_PATH, JSON.stringify(dataToSave, null, 2));
+  }
+
+  private static async saveMonsterDeaths() {
+    const dataToSave = {
+      monsterDeathLogs: this.data.monsterDeathLogs
+    };
+    await fs.writeFile(this.MONSTER_DB_PATH, JSON.stringify(dataToSave, null, 2));
+  }
+
+  static async addPlayerDeathLog(deathLog: DeathLogEntry): Promise<boolean> {
+    try {
+      const hash = this.createDeathLogHash(deathLog);
+      if (this.data.playerDeathLogsIndex.has(hash)) {
         return false;
+      }
+      this.data.playerDeathLogs.push(deathLog);
+      this.data.playerDeathLogsIndex.add(hash);
+      await this.savePlayerDeaths();
+      return true;
+    } catch (error) {
+      console.error('Erro ao adicionar player death log:', error);
+      return false;
+    }
+  }
+
+  static async addMonsterDeathLog(deathLog: DeathLogEntry): Promise<boolean> {
+    try {
+      const hash = this.createDeathLogHash(deathLog);
+      if (this.data.monsterDeathLogsIndex.has(hash)) {
+        return false;
+      }
+      this.data.monsterDeathLogs.push(deathLog);
+      this.data.monsterDeathLogsIndex.add(hash);
+      await this.saveMonsterDeaths();
+      return true;
+    } catch (error) {
+      console.error('Erro ao adicionar monster death log:', error);
+      return false;
     }
   }
 
@@ -95,13 +143,12 @@ export class Database {
     return [...this.data.players];
   }
 
-  static async removePlayer(playerId: number) {
-    this.data.players = this.data.players.filter(p => p.id != playerId);
-    await this.save();
+  static async getAllPlayerDeathLogs(): Promise<DeathLogEntry[]> {
+    return [...this.data.playerDeathLogs];
   }
 
-  static async getAllDeathLogs(): Promise<DeathLogEntry[]> {
-    return [...this.data.deathLogs];
+  static async getAllMonsterDeathLogs(): Promise<DeathLogEntry[]> {
+    return [...this.data.monsterDeathLogs];
   }
 
 }

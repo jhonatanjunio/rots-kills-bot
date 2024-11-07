@@ -3,6 +3,8 @@ import { Database } from './database';
 import { GameAPI } from './gameApi';
 import config from '../config/config.json';
 import { formatTimestamp } from '../utils/formatters';
+import { Player } from '../models/Player';
+import { isFromToday } from '../utils/formatters';
 
 export class DeathMonitor {
   private static instance: DeathMonitor;
@@ -37,22 +39,30 @@ export class DeathMonitor {
   private async checkBatch() {
     try {
       const players = await Database.getAllMonitoredPlayers();
-      const existingDeathLogs = await Database.getAllDeathLogs();
+      const existingPlayerDeathLogs = await Database.getAllPlayerDeathLogs();
+      const existingMonsterDeathLogs = await Database.getAllMonsterDeathLogs();
 
       for (const player of players) {
         try {
           console.log(`🔍 Monitorando: ${player.name}`);
-          const { deaths } = await GameAPI.getPlayerInfo(player.name);
+          const { player: updatedPlayer, deaths } = await GameAPI.getPlayerInfo(player.name);
+
+          if (updatedPlayer) {
+            await this.checkVocationChange(player, updatedPlayer.vocation);
+          }
 
           if (deaths && deaths.length > 0) {
             const playerDeaths = deaths.filter((death: any) => death.is_player === 1);
+            const monsterDeaths = deaths.filter((death: any) => 
+              death.is_player === 0 && isFromToday(death.time)
+            );
             const lastCheck = this.lastChecks.get(player.id.toString()) || 0;
             const lastCheckInSeconds = Math.floor(lastCheck / 1000);
 
-            const newDeaths = playerDeaths.filter((death: any) => {
+            const newPlayerDeaths = playerDeaths.filter((death: any) => {
               if (death.time <= lastCheckInSeconds) return false;
 
-              const deathExists = existingDeathLogs.some(log => 
+              const deathExists = existingPlayerDeathLogs.some((log: any) => 
                 log.playerName === player.name &&
                 log.timestamp === death.time &&
                 log.killed_by === death.killed_by &&
@@ -63,9 +73,28 @@ export class DeathMonitor {
               return !deathExists;
             });
 
-            if (newDeaths.length > 0) {
+            const newMonsterDeaths = monsterDeaths.filter((death: any) => {
+              if (death.time <= lastCheckInSeconds) return false;
+
+              const deathExists = existingMonsterDeathLogs.some((log: any) => 
+                log.playerName === player.name &&
+                log.timestamp === death.time &&
+                log.killed_by === death.killed_by &&
+                log.mostdamage_by === death.mostdamage_by &&
+                log.level === death.level
+              );
+
+              return !deathExists;
+            });
+
+            if (newPlayerDeaths.length > 0) {
               console.log(`⚠️ Nova morte detectada para ${player.name}`);
-              await this.processNewDeaths(player, newDeaths);
+              await this.processNewDeaths(player, newPlayerDeaths);
+            }
+
+            if (newMonsterDeaths.length > 0) {
+              console.log(`⚠️ Nova morte por monstro detectada para ${player.name}`);
+              await this.processNewMonsterDeaths(player, newMonsterDeaths);
             }
           }
 
@@ -76,6 +105,37 @@ export class DeathMonitor {
       }
     } catch (error) {
       console.error('❌ Erro no checkBatch:', error);
+    }
+  }
+
+  private async checkVocationChange(oldPlayer: Player, newVocation: number) {
+    if (oldPlayer.vocation !== newVocation) {
+      const channel = this.client.channels.cache.get(config.discord.playerClassChangeChannel) as TextChannel;
+      if (!channel) {
+        console.error('Canal de mudança de classe não encontrado');
+        return;
+      }
+
+      const oldAvatar = GameAPI.getAvatar(oldPlayer.vocation) || { name: 'Não encontrado', url: 'https://saiyansreturn.com/icon.ico' };
+      const newAvatar = GameAPI.getAvatar(newVocation) || { name: 'Não encontrado', url: 'https://saiyansreturn.com/icon.ico' };
+      
+      const vocationChangeAlert = new EmbedBuilder()
+        .setColor(oldPlayer.isAlly ? '#00FF00' : '#FF0000')
+        .setTitle(`🔄 MUDANÇA DE CLASSE DE UM ${oldPlayer.isAlly ? 'ALIADO' : 'INIMIGO'} 🔄`)
+        .setDescription(`O jogador **${oldPlayer.name}** mudou de classe!`)
+        .addFields(
+          { name: 'Classe Anterior', value: oldAvatar.name, inline: true },
+          { name: 'Nova Classe', value: newAvatar.name, inline: true },
+        )
+        .setThumbnail(oldAvatar.url)
+        .setImage(newAvatar.url)
+        .setTimestamp();
+
+      await channel.send({ embeds: [vocationChangeAlert] });
+
+      // Atualiza o banco de dados com a nova vocação
+      oldPlayer.vocation = newVocation;
+      await Database.updatePlayer(oldPlayer);
     }
   }
 
@@ -90,7 +150,7 @@ export class DeathMonitor {
     for (const death of deaths) {
       try {
         console.log('Salvando morte no banco:', death);
-        await Database.addDeathLog({
+        await Database.addPlayerDeathLog({
           playerName: player.name,
           killed_by: death.killed_by,
           mostdamage_by: death.mostdamage_by,
@@ -103,30 +163,14 @@ export class DeathMonitor {
 
         // Cria um embed rico para a mensagem de alerta
         const deathAlert = new EmbedBuilder()
-          .setColor('#FF0000')
+          .setColor(player.isAlly ? '#00FF00' : '#FF0000')
           .setTitle('⚠️ ALERTA DE MORTE ⚠️')
           .setThumbnail(getAvatar?.url || 'https://saiyansreturn.com/icon.ico')
           .addFields(
-            { 
-              name: '🎯 Guerreiro Caído', 
-              value: `**${player.name}** (Level ${death.level})`, 
-              inline: false 
-            },
-            { 
-              name: '💀 Assassino', 
-              value: `**${death.killed_by}**`, 
-              inline: true 
-            },
-            { 
-              name: '⚔️ Maior Dano', 
-              value: `**${death.mostdamage_by}**`, 
-              inline: true 
-            },
-            {
-              name: '⏰ Data/Hora', 
-              value: formatTimestamp(death.time), 
-              inline: false 
-            }
+            { name: '🎯 Guerreiro Caído', value: `**${player.name}** (Level ${death.level})`, inline: false },
+            { name: '💀 Assassino', value: `**${death.killed_by}**`, inline: true },
+            { name: '⚔️ Maior Dano', value: `**${death.mostdamage_by}**`, inline: true },
+            { name: '⏰ Data/Hora', value: formatTimestamp(death.time), inline: false }
           )
           .setFooter({ text: 'Mantenha-se alerta! Proteja seus aliados!' })
           .setTimestamp();
@@ -134,6 +178,55 @@ export class DeathMonitor {
         await channel.send({ embeds: [deathAlert] });
       } catch (error) {
         console.error('Erro ao processar morte:', error);
+      }
+    }
+  }
+
+  private async processNewMonsterDeaths(player: any, deaths: any[]) {
+    console.log('Processando novas mortes por monstros:', { player, deaths });
+    const channel = this.client.channels.cache.get(config.discord.monsterDeathLogChannel) as TextChannel;
+    if (!channel) {
+      console.error('Canal de mortes por monstros não encontrado');
+      return;
+    }
+
+    for (const death of deaths) {
+      try {
+        // Verifica se a morte aconteceu hoje
+        if (!isFromToday(death.time)) {
+          console.log(`Ignorando morte por monstro antiga de ${player.name} (${formatTimestamp(death.time)})`);
+          continue;
+        }
+
+        console.log('Salvando morte por monstro no banco:', death);
+        await Database.addMonsterDeathLog({
+          playerName: player.name,
+          killed_by: death.killed_by,
+          mostdamage_by: death.mostdamage_by,
+          timestamp: death.time,
+          level: death.level
+        });
+        console.log('Morte por monstro salva com sucesso');
+
+        const getAvatar = GameAPI.getAvatar(player.vocation);
+
+        // Cria um embed rico para a mensagem de alerta
+        const deathAlert = new EmbedBuilder()
+          .setColor(player.isAlly ? '#00FF00' : '#FF0000')
+          .setTitle(`⚠️ UM ${player.isAlly ? 'ALIADO' : 'INIMIGO'} FOI ELIMINADO POR UM MONSTRO ⚠️`)
+          .setThumbnail(getAvatar?.url || 'https://saiyansreturn.com/icon.ico')
+          .addFields(
+            { name: '🎯 Guerreiro Caído', value: `**${player.name}** (Level ${death.level})`, inline: false },
+            { name: '💀 Monstro', value: `**${death.killed_by}**`, inline: true },
+            { name: '⚔️ Maior Dano', value: `**${death.mostdamage_by}**`, inline: true },
+            { name: '⏰ Data/Hora', value: formatTimestamp(death.time), inline: false }
+          )
+          .setFooter({ text: 'Cuidado com os monstros!' })
+          .setTimestamp();
+
+        await channel.send({ embeds: [deathAlert] });
+      } catch (error) {
+        console.error('Erro ao processar morte por monstro:', error);
       }
     }
   }

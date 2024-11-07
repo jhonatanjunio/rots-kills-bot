@@ -1,34 +1,26 @@
-import { ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
+import { ChatInputCommandInteraction, AttachmentBuilder, EmbedBuilder } from 'discord.js';
 import { Database } from '../services/database';
 import { formatDate, formatKDA } from '../utils/formatters';
 import { DeathLogEntry } from '../models/Deathlog';
+import { Player } from '../models/Player';
+import { ImageGenerator } from '../services/imageGenerator';
+import { PlayerKDA } from '../models/Ranking';
 
-interface PlayerKDA {
-  name: string;
-  kills: number;
-  deaths: number;
-  assists: number;
-  kda: number;
-}
 
-interface RankingOptions {
-  startDate: number | null;
-  endDate: number;
-}
 
 async function calculatePlayerKDA(playerName: string, deathLogs: DeathLogEntry[]): Promise<PlayerKDA> {
   // Contagem de mortes (Deaths)
-  const deaths = deathLogs.filter(log => 
+  const deaths = deathLogs.filter((log: DeathLogEntry) => 
     log.playerName.toLowerCase() === playerName.toLowerCase()
   ).length;
 
   // Contagem de kills
-  const kills = deathLogs.filter(log => 
+  const kills = deathLogs.filter((log: DeathLogEntry) => 
     log.killed_by.toLowerCase() === playerName.toLowerCase()
   ).length;
 
   // Contagem de assists (dano mas não kill)
-  const assists = deathLogs.filter(log => 
+  const assists = deathLogs.filter((log: DeathLogEntry) => 
     log.mostdamage_by.toLowerCase() === playerName.toLowerCase() && 
     log.killed_by.toLowerCase() !== playerName.toLowerCase()
   ).length;
@@ -49,7 +41,7 @@ function createAsciiTable(playerStats: PlayerKDA[]): string {
   const header = 'Pos | Jogador        | K    | D    | A    | KDA  ';
   const separator = '----+---------------+------+------+------+------';
   
-  const rows = playerStats.map((stats, index) => {
+  const rows = playerStats.map((stats: PlayerKDA, index: number) => {
     const position = (index + 1).toString().padStart(2);
     const name = stats.name.padEnd(13);
     const kills = stats.kills.toString().padStart(4);
@@ -68,13 +60,12 @@ export async function showRanking(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply();
     
     const period = interaction.options.getString('period');
+    const page = interaction.options.getInteger('page') || 1;
     const options = parseRankingPeriod(period);
     
-    // Busca apenas jogadores aliados
     const players = (await Database.getAllMonitoredPlayers()).filter(p => p.isAlly);
-    const deathLogs = await Database.getAllDeathLogs();
+    const deathLogs = await Database.getAllPlayerDeathLogs();
     
-    // Filtra logs pelo período se necessário
     const filteredLogs = period ? deathLogs.filter(log => 
       log.timestamp >= (options.startDate || 0) / 1000 && 
       log.timestamp <= options.endDate / 1000
@@ -98,16 +89,35 @@ export async function showRanking(interaction: ChatInputCommandInteraction) {
     playerStats.sort((a, b) => b.kda - a.kda);
 
     const periodText = getPeriodText(period);
-    const rankingEmbed = createRankingEmbed(playerStats, periodText);
-    await interaction.editReply({ embeds: [rankingEmbed] });
+    const { buffer, totalPages } = await ImageGenerator.generateRankingStats(
+      periodText,
+      playerStats,
+      page
+    );
+
+    const attachment = new AttachmentBuilder(buffer, { name: 'ranking.png' });
+
+    // Informações de paginação
+    const totalPlayers = playerStats.length;
+    const startRank = ((page - 1) * 15) + 1;
+    const endRank = Math.min(page * 15, totalPlayers);
+    
+    let content = `Ranking de Guerreiros - ${periodText}`;
+    
+    // Só mostra informações de paginação se houver mais de uma página
+    if (totalPages > 1) {
+      content += `\nMostrando ${startRank}º ao ${endRank}º de ${totalPlayers} jogadores`;
+      content += `\nPágina ${page}/${totalPages}`;
+    }
+
+    await interaction.editReply({
+      content,
+      files: [attachment]
+    });
 
   } catch (error) {
     console.error('Erro ao gerar ranking:', error);
-    if (interaction.deferred) {
-      await interaction.editReply('Erro ao gerar ranking. Tente novamente mais tarde.');
-    } else {
-      await interaction.reply('Erro ao gerar ranking. Tente novamente mais tarde.');
-    }
+    await interaction.editReply('❌ Erro ao gerar ranking. Tente novamente mais tarde.');
   }
 }
 
@@ -156,15 +166,4 @@ function getPeriodText(period: string | null): string {
     default:
       return 'Histórico Completo';
   }
-}
-
-function createRankingEmbed(playerStats: PlayerKDA[], periodText: string): EmbedBuilder {
-  const embed = new EmbedBuilder()
-    .setColor('#FFD700')
-    .setTitle(`🏆 Ranking de Guerreiros - ${periodText}`)
-    .setDescription('```\n' + createAsciiTable(playerStats) + '\n```')
-    .setFooter({ text: 'KDA = (Kills + Assists) / Deaths' })
-    .setTimestamp();
-
-  return embed;
 }

@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
 import { Database } from '../services/database';
 import { GameAPI } from '../services/gameApi';
+import { DeathLogEntry } from '../models/Deathlog';
 
 export async function showPlayerStats(interaction: ChatInputCommandInteraction) {
   const playerName = interaction.options.getString('name');
@@ -20,7 +21,7 @@ export async function showPlayerStats(interaction: ChatInputCommandInteraction) 
     }
 
     // Busca todas as mortes do banco de dados
-    const allDeathLogs = await Database.getAllDeathLogs();
+    const allDeathLogs = await Database.getAllPlayerDeathLogs();
     const playerDeaths = allDeathLogs.filter(death => death.playerName.toLowerCase() === playerName.toLowerCase());
 
     // Calcula estatísticas dos últimos 30 dias
@@ -74,7 +75,7 @@ export async function showPlayerStats(interaction: ChatInputCommandInteraction) 
 
     // Adiciona a última morte se existir
     if (recentDeaths.length > 0) {
-      const lastDeath = recentDeaths.sort((a, b) => b.timestamp - a.timestamp)[0];
+      const lastDeath = recentDeaths.sort((a: DeathLogEntry, b: DeathLogEntry) => b.timestamp - a.timestamp)[0];
       statsEmbed.addFields({
         name: '⚰️ Última Morte',
         value: `Morto por **${lastDeath.killed_by}** em ${formatTimestamp(lastDeath.timestamp)}`,

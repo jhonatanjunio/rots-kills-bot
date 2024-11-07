@@ -3,6 +3,7 @@ import config from '../config/config.json';
 import { Database } from './database';
 import { Player } from '../models/Player';
 import { BrowserService } from './browserService';
+import { isFromToday } from '../utils/formatters';
 
 export class GameAPI {
     private static headers = {
@@ -44,18 +45,20 @@ export class GameAPI {
             });
 
             if (data.deaths && data.deaths.deaths?.length > 0) {
-                const deaths = data.deaths.deaths
-                    .filter((death: any) => death.is_player === 1)
-                    .map((death: any) => ({
+                for (const death of data.deaths.deaths) {
+                    const deathLog = {
                         playerName: playerName,
                         killed_by: death.killed_by,
                         mostdamage_by: death.mostdamage_by,
                         timestamp: death.time,
                         level: death.level
-                    }));
+                    };
 
-                for (const death of deaths) {
-                    await Database.addDeathLog(death);
+                    if (death.is_player === 1) {
+                        await Database.addPlayerDeathLog(deathLog);
+                    } else if (isFromToday(death.time)) {
+                        await Database.addMonsterDeathLog(deathLog);
+                    }
                 }
             }
             
@@ -141,11 +144,9 @@ export class GameAPI {
             }
 
             let getPlayerData = await Database.getPlayer(playerName);
-            // console.info(getPlayerData);
 
             if (getPlayerData && getPlayerData.id) {
                 const { player, deaths } = await this.updatePlayer(getPlayerData);
-                // console.info(deaths);
                 return { player, deaths };
             } else {
                 console.error(`Membro ${playerName} não encontrado no banco de dados. Você precisa adicionar o jogador primeiro com o comando /addplayer`);
@@ -178,8 +179,6 @@ export class GameAPI {
 
     static async addDeathLogs(playerName: string, deaths: any[]) {
         for (const death of deaths) {
-            if (death.is_player != 1) continue;
-
             const deathLog = {
                 playerName,
                 killed_by: death.killed_by,
@@ -188,7 +187,11 @@ export class GameAPI {
                 level: death.level
             };
 
-            await Database.addDeathLog(deathLog);
+            if (death.is_player === 1) {
+                await Database.addPlayerDeathLog(deathLog);
+            } else {
+                await Database.addMonsterDeathLog(deathLog);
+            }
         }
     }
 

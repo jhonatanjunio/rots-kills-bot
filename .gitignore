@@ -2,8 +2,12 @@
 /dist
 /node_modules
 /config/config.json
+/config/_config.json
 .env
 /database/data.json
+/database/monsterDeaths.json
+/database/playerDeaths.json
 .pkg-cache
 yarn.lock
+yarn-error.log
 package-lock.json
