@@ -25,6 +25,7 @@ const client = new Client({
 
 client.once('ready', async () => {
   console.log('Bot online!');
+  await Database.ensureDatabaseFiles();
   await Database.load();
   await registerCommands(client);
   const deathMonitor = DeathMonitor.initialize(client);

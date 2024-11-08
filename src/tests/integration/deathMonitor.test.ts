@@ -17,7 +17,7 @@ describe('DeathMonitor Integration Test', () => {
         
         // Limpa o banco de dados
         await Database.load();
-        const allLogs = await Database.getAllDeathLogs();
+        const allLogs = await Database.getAllPlayerDeathLogs();
         console.log('Logs iniciais:', allLogs.length);
 
         // Setup do mock do Discord
@@ -115,7 +115,7 @@ describe('DeathMonitor Integration Test', () => {
         await new Promise(resolve => setTimeout(resolve, 3000));
 
         // Verifica se a morte foi registrada
-        const deathLogs = await Database.getAllDeathLogs();
+        const deathLogs = await Database.getPlayerDeathLogs("TestPlayer");
         console.log('Logs após teste:', deathLogs);
         
         expect(deathLogs.length).toBeGreaterThan(0);

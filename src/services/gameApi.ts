@@ -1,9 +1,14 @@
 import fetch from 'node-fetch';
+import https from 'https';
 import config from '../config/config.json';
 import { Database } from './database';
 import { Player } from '../models/Player';
 import { BrowserService } from './browserService';
 import { isFromToday } from '../utils/formatters';
+
+const agent = new https.Agent({
+    rejectUnauthorized: false // Atenção: use apenas em ambiente de desenvolvimento
+});
 
 export class GameAPI {
     private static headers = {
@@ -14,24 +19,66 @@ export class GameAPI {
         'Pragma': 'no-cache'
     };
 
+    private static async fetchWithRetry(url: string, options: any, retries = 3): Promise<any> {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    agent,
+                    timeout: 10000 // 10 segundos timeout
+                });
+                return response;
+            } catch (error) {
+                console.error(`Tentativa ${i + 1} falhou:`, error);
+                if (i === retries - 1) throw error;
+                await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Espera crescente entre tentativas
+            }
+        }
+        throw new Error('Todas as tentativas falharam');
+    }
+
     static async createPlayer(playerName: string, isAlly: boolean) {
         try {
-            const response = await fetch(
-                `${config.game.apiUrl}/characters?server=Universe%20Supreme&name=${playerName}&limit=5`,
-                { headers: this.headers }
-            );
-            const characters = await response.json();
+            const url = `${config.game.apiUrl}/characters?server=Universe%20Supreme&name=${playerName}&limit=5`;
+            console.log('🔍 Buscando jogador:', url);
+            
+            const response = await this.fetchWithRetry(url, { headers: this.headers });
+            
+            if (!response.ok) {
+                console.error('❌ Erro na resposta da API:', {
+                    status: response.status,
+                    statusText: response.statusText
+                });
+                throw new Error(`Erro na API: ${response.status} ${response.statusText}`);
+            }
+
+            const responseText = await response.text();
+            console.log('📦 Resposta da API:', responseText);
+
+            let characters;
+            try {
+                characters = JSON.parse(responseText);
+            } catch (e) {
+                console.error('❌ Erro ao parsear JSON:', e);
+                throw new Error('Resposta inválida da API');
+            }
+
+            if (!Array.isArray(characters)) {
+                console.error('❌ Resposta não é um array:', characters);
+                throw new Error('Formato de resposta inválido');
+            }
+
             const playerData = characters.find((character: any) => character.name === playerName);
             
             if (!playerData || !playerData.id) {
-                console.error('Jogador não encontrado');
+                console.error('❌ Jogador não encontrado nos dados:', characters);
                 throw new Error('Jogador não encontrado');
             }
 
             const getDeaths = await BrowserService.getPlayerData(playerData.id);            
             
             if (getDeaths.error || !getDeaths.data) {
-                console.error(getDeaths.message || 'Erro ao buscar dados do jogador');
+                console.error('❌ Erro ao buscar dados do jogador:', getDeaths.message);
                 throw new Error(getDeaths.message || 'Erro ao buscar dados do jogador');
             }
 
@@ -64,7 +111,7 @@ export class GameAPI {
             
             return data;
         } catch (error) {
-            console.error('Erro ao criar jogador:', error);
+            console.error('❌ Erro ao criar jogador:', error);
             throw error;
         }
     }

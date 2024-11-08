@@ -35,7 +35,7 @@ describe('DeathMonitor', () => {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Assert
-    const deathLogs = await Database.getAllDeathLogs();
+    const deathLogs = await Database.getPlayerDeathLogs("Only Damage");
     expect(deathLogs.length).toBeGreaterThan(0);
   });
 }); 

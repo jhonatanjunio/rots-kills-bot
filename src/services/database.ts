@@ -139,6 +139,10 @@ export class Database {
     }
   }
 
+  static async getPlayerDeathLogs(playerName: string): Promise<DeathLogEntry[]> {
+    return this.data.playerDeathLogs.filter((log: DeathLogEntry) => log.playerName === playerName);
+  }
+
   static async getAllMonitoredPlayers(): Promise<Player[]> {
     return [...this.data.players];
   }
@@ -151,4 +155,22 @@ export class Database {
     return [...this.data.monsterDeathLogs];
   }
 
+  static async ensureDatabaseFiles() {
+    const files = [
+      { path: 'database/data.json', content: { players: [] } },
+      { path: 'database/playerDeaths.json', content: { playerDeathLogs: [] } },
+      { path: 'database/monsterDeaths.json', content: { monsterDeathLogs: [] } }
+    ];
+
+    for (const file of files) {
+      try {
+        await fs.access(file.path);
+      } catch {
+        // Se o diretório não existir, cria
+        await fs.mkdir('database', { recursive: true });
+        // Cria o arquivo com conteúdo inicial
+        await fs.writeFile(file.path, JSON.stringify(file.content, null, 2));
+      }
+    }
+  }
 }

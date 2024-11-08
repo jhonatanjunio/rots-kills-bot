@@ -1,13 +1,24 @@
-import satori from 'satori';
-import sharp from 'sharp';
+import { createCanvas, loadImage, GlobalFonts, SKRSContext2D } from '@napi-rs/canvas';
+
 import { TeamStats } from '../models/TeamStats';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PlayerKDA } from '../models/Ranking';
 
 export class ImageGenerator {
-    private static readonly PLAYERS_PER_PAGE = 15;
+    private static readonly PLAYERS_PER_PAGE = 10;
     
+    private static initializeFonts() {
+        GlobalFonts.registerFromPath(
+            join(__dirname, '../../assets/fonts/Inter-Medium.ttf'),
+            'Inter'
+        );
+        GlobalFonts.registerFromPath(
+            join(__dirname, '../../assets/fonts/Inter-Bold.ttf'),
+            'Inter Bold'
+        );
+    }
+
     private static async loadFonts() {
         return {
             regular: await readFileSync(join(__dirname, '../../assets/fonts/Inter-Medium.ttf')),
@@ -21,7 +32,7 @@ export class ImageGenerator {
         enemyStats: TeamStats,
         page: number = 1
     ): Promise<{ buffer: Buffer; totalPages: number }> {
-        const fonts = await this.loadFonts();
+        this.initializeFonts();
 
         // Calcula o total de páginas baseado no maior número de jogadores
         const maxPlayers = Math.max(allyStats.players.length, enemyStats.players.length);
@@ -42,116 +53,157 @@ export class ImageGenerator {
         };
 
         // Constantes para cálculo de altura
-        const HEADER_HEIGHT = 80; // Título principal
+        const HEADER_HEIGHT = 80;  // Título principal
         const TEAM_HEADER_HEIGHT = 50; // Cabeçalho de cada time
         const ROW_HEIGHT = 40; // Altura de cada linha de jogador
         const FOOTER_HEIGHT = 50; // Rodapé com totais
-        const PADDING = 40; // Padding total (topo + baixo)
+        const PADDING_TOP = 40; // Padding superior
+        const PADDING_BOTTOM = 40; // Padding inferior
+        const SECTION_PADDING = 20; // Padding entre seções
+        const EXTRA_SPACE = 100; // Espaço extra para garantir que nada seja cortado
 
-        // Calcula a altura necessária baseada no número de jogadores da página atual
-        const pagePlayersCount = Math.max(
+        // Pega o número real de jogadores na página atual
+        const currentPagePlayersCount = Math.max(
             paginatedAllyStats.players.length,
             paginatedEnemyStats.players.length
         );
-        const contentHeight = HEADER_HEIGHT + 
-                            TEAM_HEADER_HEIGHT + 
-                            (ROW_HEIGHT * pagePlayersCount) + 
-                            FOOTER_HEIGHT + 
-                            PADDING;
 
-        // Cores mais suaves
+        // Calcula a altura total necessária
+        const contentHeight = HEADER_HEIGHT + // Título
+                            PADDING_TOP + // Padding superior
+                            TEAM_HEADER_HEIGHT + // Cabeçalho dos times
+                            (ROW_HEIGHT * currentPagePlayersCount) + // Linhas de jogadores
+                            SECTION_PADDING + // Espaço entre a lista e o footer
+                            FOOTER_HEIGHT + // Rodapé
+                            PADDING_BOTTOM + // Padding inferior
+                            EXTRA_SPACE; // Espaço extra de segurança
+
+        const canvas = createCanvas(1024, contentHeight);
+        const ctx = canvas.getContext('2d');
+
         const COLORS = {
-            ALLY: '#4ade80',  // Verde mais suave
-            ENEMY: '#f87171', // Vermelho mais suave
             TEXT: '#FFFFFF',
             BACKGROUND: '#2F3136',
             SECONDARY_BG: '#36393F',
             BORDER: '#4F545C',
-            SUBTEXT: '#B9BBBE'
+            SUBTEXT: '#B9BBBE',
+            GOLD: '#FFD700',
+            SILVER: '#C0C0C0',
+            BRONZE: '#CD7F32',
+            ROW_BG_1: '#2b2d31',
+            ROW_BG_2: '#2b2d31',
+            ROW_BG_3: '#2b2d31',
+            ALLY: '#4ade80',
+            ENEMY: '#f87171',
         };
 
-        const html = {
-            type: 'div',
-            props: {
-                style: {
-                    display: 'flex',
-                    flexDirection: 'column',
-                    padding: '20px',
-                    width: '1024px',
-                    height: `${contentHeight}px`,
-                    backgroundColor: COLORS.BACKGROUND,
-                    color: COLORS.TEXT,
-                    fontFamily: 'Inter'
-                },
-                children: [
-                    {
-                        type: 'div',
-                        props: {
-                            style: {
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '24px',
-                                marginBottom: '20px',
-                                color: COLORS.TEXT,
-                                fontWeight: 'bold'
-                            },
-                            children: [`Estatísticas de Guerra - ${period}`]
-                        }
-                    },
-                    {
-                        type: 'div',
-                        props: {
-                            style: {
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                gap: '20px'
-                            },
-                            children: [
-                                // No Fear to Kill Stats
-                                this.createTeamSection('No Fear to Kill', paginatedAllyStats, COLORS.ALLY),
-                                // Divisor
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            width: '2px',
-                                            backgroundColor: COLORS.BORDER
-                                        }
-                                    }
-                                },
-                                // Enemy Stats
-                                this.createTeamSection('Inimigos', paginatedEnemyStats, COLORS.ENEMY)
-                            ]
-                        }
-                    }
-                ]
-            }
-        };
+        // Desenha o fundo
+        ctx.fillStyle = COLORS.BACKGROUND;
+        ctx.fillRect(0, 0, 1024, contentHeight);
 
-        const svg = await satori(html, {
-            width: 1024,
-            height: contentHeight,
-            fonts: [
-                {
-                    name: 'Inter',
-                    data: fonts.regular,
-                    weight: 400,
-                    style: 'normal'
-                },
-                {
-                    name: 'Inter',
-                    data: fonts.bold,
-                    weight: 700,
-                    style: 'normal'
-                }
-            ]
-        });
+        // Desenha o título
+        ctx.font = 'bold 24px Inter';
+        ctx.fillStyle = COLORS.TEXT;
+        ctx.textAlign = 'center';
+        ctx.fillText(`Estatísticas de Guerra - ${period}`, 512, 50);
+
+        // Container principal
+        const mainY = HEADER_HEIGHT;
+        const teamWidth = 482; // (1024 - 60) / 2
+
+        // Time aliado (esquerda)
+        this.drawTeamStats(ctx, 'No Fear to Kill', paginatedAllyStats, COLORS.ALLY, 20, mainY, teamWidth);
+
+        // Divisor central
+        ctx.fillStyle = COLORS.BORDER;
+        ctx.fillRect(512, mainY, 2, contentHeight - HEADER_HEIGHT - PADDING_BOTTOM);
+
+        // Time inimigo (direita)
+        this.drawTeamStats(ctx, 'Inimigos', paginatedEnemyStats, COLORS.ENEMY, 522, mainY, teamWidth);
 
         return {
-            buffer: await sharp(Buffer.from(svg)).png().toBuffer(),
+            buffer: canvas.toBuffer('image/png'),
             totalPages: maxPlayers > this.PLAYERS_PER_PAGE ? totalPages : 1
         };
+    }
+
+    private static drawTeamStats(
+        ctx: SKRSContext2D,
+        title: string,
+        stats: TeamStats,
+        color: string,
+        x: number,
+        y: number,
+        width: number
+    ) {
+        // Desenha o fundo da seção
+        ctx.fillStyle = '#36393F';
+        ctx.fillRect(x, y, width, 400);
+
+        // Título do time
+        ctx.font = 'bold 20px Inter';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.fillText(title, x + width/2, y + 30);
+
+        // Cabeçalho da tabela
+        const headerY = y + 60;
+        ctx.fillStyle = '#2F3136';
+        ctx.fillRect(x + 10, headerY, width - 20, 40);
+
+        // Colunas do cabeçalho
+        ctx.font = '14px Inter';
+        ctx.fillStyle = '#B9BBBE';
+        ctx.textAlign = 'left';
+        ctx.fillText('Jogador', x + 20, headerY + 25);
+
+        const columns = ['K', 'D', 'A', 'KDA'];
+        const columnWidth = (width - 150) / columns.length;
+        columns.forEach((col, index) => {
+            ctx.textAlign = 'center';
+            ctx.fillText(col, x + 150 + (columnWidth * index) + columnWidth/2, headerY + 25);
+        });
+
+        // Linhas dos jogadores
+        let rowY = headerY + 50;
+        stats.players.forEach(player => {
+            ctx.fillStyle = '#4F545C';
+            ctx.fillRect(x + 10, rowY, width - 20, 1);
+
+            ctx.font = '14px Inter';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.textAlign = 'left';
+            ctx.fillText(player.name, x + 20, rowY + 25);
+
+            const values = [player.kills, player.deaths, player.assists, player.kda.toFixed(2)];
+            values.forEach((value, index) => {
+                ctx.textAlign = 'center';
+                ctx.fillText(value.toString(), x + 150 + (columnWidth * index) + columnWidth/2, rowY + 25);
+            });
+
+            rowY += 40;
+        });
+
+        // Rodapé com totais
+        const footerY = rowY + 20;
+        ctx.fillStyle = '#2F3136';
+        ctx.fillRect(x + 10, footerY, width - 20, 40);
+
+        ctx.font = 'bold 14px Inter';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'left';
+        ctx.fillText('Total', x + 20, footerY + 25);
+
+        const totals = [
+            stats.totalKills,
+            stats.totalDeaths,
+            stats.totalAssists,
+            stats.averageKDA.toFixed(2)
+        ];
+        totals.forEach((value, index) => {
+            ctx.textAlign = 'center';
+            ctx.fillText(value.toString(), x + 150 + (columnWidth * index) + columnWidth/2, footerY + 25);
+        });
     }
 
     private static createTeamSection(
@@ -384,24 +436,23 @@ export class ImageGenerator {
         playerStats: PlayerKDA[],
         page: number = 1
     ): Promise<{ buffer: Buffer; totalPages: number }> {
-        const fonts = await this.loadFonts();
+        this.initializeFonts();
 
-        // Calcula o total de páginas
-        const totalPages = Math.ceil(playerStats.length / this.PLAYERS_PER_PAGE);
-
-        // Pagina os jogadores
+        // Mantém a mesma lógica de paginação
         const startIndex = (page - 1) * this.PLAYERS_PER_PAGE;
         const endIndex = startIndex + this.PLAYERS_PER_PAGE;
         const paginatedStats = playerStats.slice(startIndex, endIndex);
+        const totalPages = Math.ceil(playerStats.length / this.PLAYERS_PER_PAGE);
 
-        // Altura fixa para 15 jogadores
+        // Mantém as mesmas constantes de altura
         const HEADER_HEIGHT = 80;
         const TABLE_HEADER_HEIGHT = 50;
         const ROW_HEIGHT = 40;
         const PADDING = 40;
+
         const contentHeight = HEADER_HEIGHT + 
                             TABLE_HEADER_HEIGHT + 
-                            (ROW_HEIGHT * Math.min(this.PLAYERS_PER_PAGE, paginatedStats.length)) + 
+                            (ROW_HEIGHT * paginatedStats.length) + 
                             PADDING;
 
         const COLORS = {
@@ -413,99 +464,105 @@ export class ImageGenerator {
             GOLD: '#FFD700',
             SILVER: '#C0C0C0',
             BRONZE: '#CD7F32',
-            ROW_BG_1: '#2b2d31',  // Fundo mais escuro para primeiro lugar
-            ROW_BG_2: '#2b2d31',  // Fundo mais escuro para segundo lugar
-            ROW_BG_3: '#2b2d31',  // Fundo mais escuro para terceiro lugar
+            ROW_BG_1: '#2b2d31',
+            ROW_BG_2: '#2b2d31',
+            ROW_BG_3: '#2b2d31',
         };
 
-        const html = {
-            type: 'div',
-            props: {
-                style: {
-                    display: 'flex',
-                    flexDirection: 'column',
-                    padding: '20px',
-                    width: '1024px',
-                    height: `${contentHeight}px`,
-                    backgroundColor: COLORS.BACKGROUND,
-                    color: COLORS.TEXT,
-                    fontFamily: 'Inter'
-                },
-                children: [
-                    // Container principal da tabela
-                    {
-                        type: 'div',
-                        props: {
-                            style: {
-                                display: 'flex',
-                                flexDirection: 'column',
-                                flex: 1
-                            },
-                            children: [
-                                // Título
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            fontSize: '24px',
-                                            marginBottom: '20px',
-                                            color: COLORS.TEXT,
-                                            fontWeight: 'bold'
-                                        },
-                                        children: [`Ranking de Guerreiros - ${period}`]
-                                    }
-                                },
-                                // Container da tabela
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            backgroundColor: COLORS.SECONDARY_BG,
-                                            borderRadius: '8px',
-                                            padding: '15px'
-                                        },
-                                        children: [
-                                            this.createRankingHeader(),
-                                            ...paginatedStats.map((player, index) => 
-                                                this.createRankingRow(player, startIndex + index + 1)
-                                            )
-                                        ]
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                ]
+        const MEDALS = {
+            FIRST: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f947.svg',
+            SECOND: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f948.svg',
+            THIRD: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f949.svg'
+        };
+
+        const canvas = createCanvas(1024, contentHeight);
+        const ctx = canvas.getContext('2d');
+
+        // Desenha o fundo
+        ctx.fillStyle = COLORS.BACKGROUND;
+        ctx.fillRect(0, 0, 1024, contentHeight);
+
+        // Desenha o título
+        ctx.font = 'bold 24px Inter';
+        ctx.fillStyle = COLORS.TEXT;
+        ctx.textAlign = 'center';
+        ctx.fillText(`Ranking de Guerreiros - ${period}`, 512, 50);
+
+        // Container da tabela
+        const tableY = HEADER_HEIGHT;
+        ctx.fillStyle = COLORS.SECONDARY_BG;
+        ctx.fillRect(20, tableY, 984, contentHeight - HEADER_HEIGHT - 20);
+
+        // Cabeçalho da tabela usando createRankingHeader
+        const headerY = tableY + 20;
+        const header = this.createRankingHeader();
+        ctx.fillStyle = COLORS.BACKGROUND;
+        ctx.fillRect(30, headerY, 964, 40);
+
+        // Desenha as colunas do cabeçalho usando os dados do header
+        const columnWidths = [80, 240, 160, 160, 160, 160];
+        let xPos = 30;
+        header.props.children.forEach((headerCol: any, index: number) => {
+            ctx.font = '14px Inter';
+            ctx.fillStyle = COLORS.SUBTEXT;
+            ctx.textAlign = index === 1 ? 'left' : 'center';
+            const textX = index === 1 ? xPos + 10 : xPos + columnWidths[index]/2;
+            ctx.fillText(headerCol.props.children[0], textX, headerY + 25);
+            xPos += columnWidths[index];
+        });
+
+        // Pré-carrega as imagens das medalhas
+        const medalImages = {
+            FIRST: await loadImage(MEDALS.FIRST),
+            SECOND: await loadImage(MEDALS.SECOND),
+            THIRD: await loadImage(MEDALS.THIRD)
+        };
+
+        // Linhas dos jogadores usando createRankingRow
+        let rowY = headerY + 50;
+        paginatedStats.forEach((player, index) => {
+            const position = startIndex + index + 1;
+            const row = this.createRankingRow(player, position);
+            
+            // Aplica o background da linha baseado na posição
+            if (position <= 3) {
+                ctx.fillStyle = row.props.style.backgroundColor as string;
+                ctx.fillRect(30, rowY, 964, 40);
             }
-        };
 
-        const svg = await satori(html, {
-            width: 1024,
-            height: contentHeight,
-            fonts: [
-                {
-                    name: 'Inter',
-                    data: fonts.regular,
-                    weight: 400,
-                    style: 'normal'
-                },
-                {
-                    name: 'Inter',
-                    data: fonts.bold,
-                    weight: 700,
-                    style: 'normal'
+            // Desenha as células usando os dados do row
+            xPos = 30;
+            row.props.children.forEach((cell: any, index: number) => {
+                if (index === 0 && position <= 3) {
+                    // Desenha medalha para os 3 primeiros
+                    const medalImage = medalImages[['FIRST', 'SECOND', 'THIRD'][position - 1] as keyof typeof medalImages];
+                    const medalSize = 20;
+                    const medalY = rowY + (40 - medalSize) / 2;
+                    ctx.drawImage(medalImage, xPos + (columnWidths[0] - medalSize) / 2, medalY, medalSize, medalSize);
+                } else {
+                    const text = typeof cell.props.children === 'string' 
+                        ? cell.props.children 
+                        : cell.props.children[0].toString();
+                    
+                    ctx.font = '14px Inter';
+                    ctx.fillStyle = cell.props.style.color || COLORS.TEXT;
+                    ctx.textAlign = index === 1 ? 'left' : 'center';
+                    const textX = index === 1 ? xPos + 10 : xPos + columnWidths[index]/2;
+                    ctx.fillText(text, textX, rowY + 25);
                 }
-            ]
+                xPos += columnWidths[index];
+            });
+
+            // Linha divisória
+            ctx.fillStyle = COLORS.BORDER;
+            ctx.fillRect(30, rowY + 39, 964, 1);
+
+            rowY += 40;
         });
 
         return {
-            buffer: await sharp(Buffer.from(svg)).png().toBuffer(),
-            totalPages: totalPages
+            buffer: canvas.toBuffer('image/png'),
+            totalPages
         };
     }
 
