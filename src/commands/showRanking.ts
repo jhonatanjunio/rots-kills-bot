@@ -5,6 +5,7 @@ import { DeathLogEntry } from '../models/Deathlog';
 import { Player } from '../models/Player';
 import { ImageGenerator } from '../services/imageGenerator';
 import { PlayerKDA } from '../models/Ranking';
+import { logtail } from '../utils/logtail';
 
 
 
@@ -117,6 +118,7 @@ export async function showRanking(interaction: ChatInputCommandInteraction) {
 
   } catch (error) {
     console.error('Erro ao gerar ranking:', error);
+    logtail.error(`Erro ao gerar ranking: ${error}`);
     await interaction.editReply('❌ Erro ao gerar ranking. Tente novamente mais tarde.');
   }
 }

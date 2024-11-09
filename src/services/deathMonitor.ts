@@ -5,6 +5,7 @@ import config from '../config/config.json';
 import { formatTimestamp } from '../utils/formatters';
 import { Player } from '../models/Player';
 import { isFromToday } from '../utils/formatters';
+import { logtail } from '../utils/logtail';
 
 export class DeathMonitor {
   private static instance: DeathMonitor;
@@ -101,10 +102,12 @@ export class DeathMonitor {
           this.lastChecks.set(player.id.toString(), Date.now());
         } catch (error) {
           console.error(`❌ Erro ao verificar jogador ${player.name}:`, error);
+          logtail.error(`Erro ao verificar jogador ${player.name}: ${error}`);
         }
       }
     } catch (error) {
       console.error('❌ Erro no checkBatch:', error);
+      logtail.error(`Erro no checkBatch: ${error}`);
     }
   }
 
@@ -178,6 +181,7 @@ export class DeathMonitor {
         await channel.send({ embeds: [deathAlert] });
       } catch (error) {
         console.error('Erro ao processar morte:', error);
+        logtail.error(`Erro ao processar morte: ${error}`);
       }
     }
   }
@@ -227,6 +231,7 @@ export class DeathMonitor {
         await channel.send({ embeds: [deathAlert] });
       } catch (error) {
         console.error('Erro ao processar morte por monstro:', error);
+        logtail.error(`Erro ao processar morte por monstro: ${error}`);
       }
     }
   }

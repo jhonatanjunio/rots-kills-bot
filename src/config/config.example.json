@@ -1,4 +1,7 @@
 {
+    "logtail": {
+        "token": ""
+    },
     "discord": {
         "token": "",
         "clientId": "",

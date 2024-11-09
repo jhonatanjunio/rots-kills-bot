@@ -1,10 +1,12 @@
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import puppeteer from 'puppeteer-extra';
 import path from 'path';
+import { logtail } from '../utils/logtail';
 
 export interface PlayerDataResponse {
   error: boolean;
   message?: string;
+  method?: 'fetch' | 'browser';
   data?: {
     id: number;
     name: string;
@@ -27,6 +29,33 @@ export interface PlayerDataResponse {
 
 export class BrowserService {
   private static browser: any | null = null;
+  private static readonly API_URL = 'https://api.saiyansreturn.com';
+
+  private static async fetchPlayerData(playerId: number): Promise<PlayerDataResponse> {
+    try {
+      const response = await fetch(
+        `${this.API_URL}/profile/${playerId}?server=Universe%20Supreme`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Erro na requisição: ${response.status}`);
+      }
+
+      const data: any = await response.json();
+      return { error: false, data, method: 'fetch' };
+    } catch (error) {
+      console.error('Erro ao buscar dados via fetch:', error);
+      logtail.error(`Erro ao buscar dados: ${error}`);
+      return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'fetch' };
+    }
+  }
 
   static async initialize() {
     if (!this.browser) {
@@ -52,7 +81,7 @@ export class BrowserService {
         this.browser = browser;
       } catch (error) {
         console.error('Erro ao inicializar o browser:', error);
-        console.error('Caminho do Chrome:', chromePath);
+        logtail.error(`Erro ao inicializar o browser: ${error}`);
         throw error;
       }
     }
@@ -61,6 +90,14 @@ export class BrowserService {
 
   static async getPlayerData(playerId: number): Promise<PlayerDataResponse> {
     try {
+      // Tenta primeiro com fetch
+      const fetchResult = await this.fetchPlayerData(playerId);
+      if (fetchResult && !fetchResult.error) {
+        return fetchResult;
+      }
+
+      // Se falhar, usa o puppeteer como fallback
+      console.log('Fetch falhou, usando browser como fallback...');
       const browser = await this.initialize();
       const page = await browser.newPage();
       
@@ -75,15 +112,16 @@ export class BrowserService {
         if (response.url().includes('/profile/')) {
           try {
             const data = await response.json();
-            responseData = { error: false, data };
+            responseData = { error: false, data, method: 'browser' };
           } catch (e) {
             console.log('Erro ao parsear resposta:', e);
-            responseData = { error: true, message: 'Erro ao parsear resposta da API' };
+            responseData = { error: true, message: 'Erro ao parsear resposta da API', method: 'browser' };
+            logtail.error(`Erro ao parsear resposta: ${e}`);
           }
         }
       });
 
-      await page.goto(`https://api.saiyansreturn.com/profile/${playerId}?server=Universe%20Supreme`, {
+      await page.goto(`${this.API_URL}/profile/${playerId}?server=Universe%20Supreme`, {
         waitUntil: 'networkidle0',
         timeout: 30000
       });
@@ -94,16 +132,17 @@ export class BrowserService {
         attempts++;
       }
 
-      if (!responseData) {
-        return { error: true, message: 'Timeout ao aguardar dados do jogador' };
-      }
-
       await page.close();
+
+      if (!responseData) {
+        return { error: true, message: 'Timeout ao aguardar dados do jogador', method: 'browser' };
+      }
 
       return responseData;
     } catch (error) {
-      console.error('Erro ao buscar dados via browser:', error);
-      return { error: true, message: `Erro ao buscar dados: ${error}` };
+      console.error('Erro ao buscar dados:', error);
+      logtail.error(`Erro ao buscar dados: ${error}`);
+      return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'browser' };
     }
   }
 }

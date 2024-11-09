@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { Player } from '../models/Player';
 import { DeathLogEntry } from '../models/Deathlog';
+import { logtail } from '../utils/logtail';
 
 interface DatabaseSchema {
   players: Player[];
@@ -34,6 +35,7 @@ export class Database {
       this.data.players = loadedData.players;
     } catch {
       this.data.players = [];
+      logtail.error('Erro ao carregar dados do banco de dados');
       await this.save();
     }
 
@@ -47,6 +49,7 @@ export class Database {
     } catch {
       this.data.playerDeathLogs = [];
       this.data.playerDeathLogsIndex = new Set();
+      logtail.error('Erro ao carregar dados dos logs de mortes dos players');
       await this.savePlayerDeaths();
     }
 
@@ -60,6 +63,7 @@ export class Database {
     } catch {
       this.data.monsterDeathLogs = [];
       this.data.monsterDeathLogsIndex = new Set();
+      logtail.error('Erro ao carregar dados dos logs de mortes dos monstros');
       await this.saveMonsterDeaths();
     }
   }
@@ -119,6 +123,7 @@ export class Database {
       return true;
     } catch (error) {
       console.error('Erro ao adicionar player death log:', error);
+      logtail.error(`Erro ao adicionar player death log: ${error}`);
       return false;
     }
   }
@@ -170,6 +175,7 @@ export class Database {
         await fs.mkdir('database', { recursive: true });
         // Cria o arquivo com conteúdo inicial
         await fs.writeFile(file.path, JSON.stringify(file.content, null, 2));
+        logtail.error(`Erro ao criar arquivo: ${file.path}`);
       }
     }
   }

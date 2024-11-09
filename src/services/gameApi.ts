@@ -5,6 +5,7 @@ import { Database } from './database';
 import { Player } from '../models/Player';
 import { BrowserService } from './browserService';
 import { isFromToday } from '../utils/formatters';
+import { logtail } from '../utils/logtail';
 
 const agent = new https.Agent({
     rejectUnauthorized: false // Atenção: use apenas em ambiente de desenvolvimento
@@ -30,6 +31,7 @@ export class GameAPI {
                 return response;
             } catch (error) {
                 console.error(`Tentativa ${i + 1} falhou:`, error);
+                logtail.error(`Tentativa ${i + 1} falhou: ${error}`);
                 if (i === retries - 1) throw error;
                 await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Espera crescente entre tentativas
             }
@@ -60,11 +62,13 @@ export class GameAPI {
                 characters = JSON.parse(responseText);
             } catch (e) {
                 console.error('❌ Erro ao parsear JSON:', e);
+                logtail.error(`Erro ao parsear JSON: ${e}`);
                 throw new Error('Resposta inválida da API');
             }
 
             if (!Array.isArray(characters)) {
                 console.error('❌ Resposta não é um array:', characters);
+                logtail.error(`Resposta não é um array: ${characters}`);
                 throw new Error('Formato de resposta inválido');
             }
 
@@ -72,6 +76,7 @@ export class GameAPI {
             
             if (!playerData || !playerData.id) {
                 console.error('❌ Jogador não encontrado nos dados:', characters);
+                logtail.error(`Jogador não encontrado nos dados: ${characters}`);
                 throw new Error('Jogador não encontrado');
             }
 
@@ -79,6 +84,7 @@ export class GameAPI {
             
             if (getDeaths.error || !getDeaths.data) {
                 console.error('❌ Erro ao buscar dados do jogador:', getDeaths.message);
+                logtail.error(`Erro ao buscar dados do jogador: ${getDeaths.message}`);
                 throw new Error(getDeaths.message || 'Erro ao buscar dados do jogador');
             }
 
@@ -112,6 +118,7 @@ export class GameAPI {
             return data;
         } catch (error) {
             console.error('❌ Erro ao criar jogador:', error);
+            logtail.error(`Erro ao criar jogador: ${error}`);
             throw error;
         }
     }
@@ -121,6 +128,7 @@ export class GameAPI {
             const playerData = await BrowserService.getPlayerData(player.id);
             
             if (playerData.error || !playerData.data) {
+                logtail.error(`Erro ao buscar dados do jogador: ${playerData.message}`);
                 throw new Error(playerData.message || 'Erro ao buscar dados do jogador');
             }
 
@@ -161,6 +169,7 @@ export class GameAPI {
             };
         } catch (error) {
             console.error(`Erro ao atualizar dados do jogador ${player.name}:`, error);
+            logtail.error(`Erro ao atualizar dados do jogador ${player.name}: ${error}`);
             return {
                 error: true,
                 message: `Erro ao atualizar dados do jogador ${player.name}: ${error}`,
@@ -204,6 +213,7 @@ export class GameAPI {
             }
         } catch (error) {
             console.error('Erro em getPlayerInfo:', error);
+            logtail.error(`Erro em getPlayerInfo: ${error}`);
             return { error: true, message: String(error), player: null, deaths: [] };
         }
     }
@@ -217,6 +227,7 @@ export class GameAPI {
             };
         } catch (error) {
             console.error(`Erro ao buscar mortes do jogador ${player.name}:`, error);
+            logtail.error(`Erro ao buscar mortes do jogador ${player.name}: ${error}`);
             return {
                 error: true,
                 message: `Erro ao buscar mortes do jogador ${player.name}: ${error}`

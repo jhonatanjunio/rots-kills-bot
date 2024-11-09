@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
 import { Database } from '../services/database';
 import { GameAPI } from '../services/gameApi';
 import { DeathLogEntry } from '../models/Deathlog';
+import { logtail } from '../utils/logtail';
 
 export async function showPlayerStats(interaction: ChatInputCommandInteraction) {
   const playerName = interaction.options.getString('name');
@@ -87,6 +88,7 @@ export async function showPlayerStats(interaction: ChatInputCommandInteraction) 
 
   } catch (error) {
     console.error('Erro ao buscar estatísticas:', error);
+    logtail.error(`Erro ao buscar estatísticas: ${error}`);
     if (interaction.deferred) {
       await interaction.editReply('Erro ao buscar estatísticas do jogador. Tente novamente mais tarde.');
     } else {

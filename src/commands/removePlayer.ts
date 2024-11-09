@@ -2,6 +2,7 @@ import {
   ChatInputCommandInteraction,
 } from 'discord.js';
 import { Database } from '../services/database';
+import { logtail } from '../utils/logtail';
 
 export async function removePlayer(interaction: ChatInputCommandInteraction) {
   const playerName = interaction.options.getString('name');
@@ -23,6 +24,7 @@ export async function removePlayer(interaction: ChatInputCommandInteraction) {
     await interaction.reply(`Jogador ${playerName} removido com sucesso!`);
   } catch (error) {
     console.error('Erro ao remover jogador:', error);
+    logtail.error(`Erro ao remover jogador: ${error}`);
     await interaction.reply('Erro ao remover jogador. Tente novamente mais tarde.');
   }
 }

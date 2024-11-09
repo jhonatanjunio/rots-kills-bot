@@ -4,6 +4,7 @@ import { formatKDA } from '../utils/formatters';
 import moment from 'moment-timezone';
 import { ImageGenerator } from '../services/imageGenerator';
 import { PlayerStats, TeamStats } from '../models/TeamStats';
+import { logtail } from '../utils/logtail';
 
 interface PeriodInfo {
   seconds: number;
@@ -156,6 +157,7 @@ export async function war(interaction: ChatInputCommandInteraction) {
 
   } catch (error) {
     console.error('Erro ao gerar estatísticas de guerra:', error);
+    logtail.error(`Erro ao gerar estatísticas de guerra: ${error}`);
     await interaction.editReply('❌ Erro ao gerar estatísticas de guerra. Tente novamente mais tarde.');
   }
 }
