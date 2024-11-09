@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction } from 'discord.js';
 import { GameAPI } from '../services/gameApi';
+import { Database } from '../services/database';
 
 export async function addPlayer(interaction: ChatInputCommandInteraction) {
   const playerName = interaction.options.getString('name');
@@ -13,6 +14,17 @@ export async function addPlayer(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   
   try {
+    // Verifica se o jogador já existe no banco de dados
+    const existingPlayer = await Database.getPlayer(playerName);
+    
+    if (existingPlayer) {
+      const statusText = existingPlayer.isAlly ? 'aliado' : 'inimigo';
+      await interaction.editReply(
+        `❌ O jogador **${playerName}** já está sendo monitorado como ${statusText}.`
+      );
+      return;
+    }
+
     const isAlly = playerType === 'ally';
     await GameAPI.createPlayer(playerName, isAlly);
     

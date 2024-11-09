@@ -5,7 +5,8 @@
         "guildId": "",
         "deathLogChannel": "",
         "monsterDeathLogChannel": "",
-        "playerClassChangeChannel": ""
+        "playerClassChangeChannel": "",
+        "managerRole": ""
     },
     "game": {
         "apiUrl": "https://api.saiyansreturn.com/"

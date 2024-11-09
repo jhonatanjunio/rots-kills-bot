@@ -1,5 +1,6 @@
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import puppeteer from 'puppeteer-extra';
+import path from 'path';
 
 export interface PlayerDataResponse {
   error: boolean;
@@ -29,22 +30,31 @@ export class BrowserService {
 
   static async initialize() {
     if (!this.browser) {
-      // Adiciona o plugin stealth
       puppeteer.use(StealthPlugin());
 
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-infobars',
-          '--window-position=0,0',
-          '--ignore-certifcate-errors',
-          '--ignore-certifcate-errors-spki-list',
-        ],
-      });
+      // Define o caminho do Chrome para Windows
+      const chromePath = path.join(process.cwd(), '.local-chromium', 'chrome.exe');
 
-      this.browser = browser;
+      try {
+        const browser = await puppeteer.launch({
+          headless: true,
+          executablePath: chromePath,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-infobars',
+            '--window-position=0,0',
+            '--ignore-certifcate-errors',
+            '--ignore-certifcate-errors-spki-list',
+          ],
+        });
+
+        this.browser = browser;
+      } catch (error) {
+        console.error('Erro ao inicializar o browser:', error);
+        console.error('Caminho do Chrome:', chromePath);
+        throw error;
+      }
     }
     return this.browser;
   }

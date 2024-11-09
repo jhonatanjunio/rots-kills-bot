@@ -3,6 +3,7 @@ import config from './config/config.json';
 import { Database } from './services/database';
 import { commands, CommandName, registerCommands } from './commands';
 import { DeathMonitor } from './services/deathMonitor';
+import { hasManagerRole } from './utils/permissions';
 require('dotenv').config();
 const client = new Client({
   intents: [
@@ -39,6 +40,14 @@ client.on('interactionCreate', async (interaction: Interaction) => {
   
   if (commandName in commands) {
     try {
+      if (!await hasManagerRole(interaction as ChatInputCommandInteraction)) {
+        await interaction.reply({ 
+          content: '❌ Você não tem permissão para usar este comando. Apenas usuários com o cargo de gerenciador podem utilizá-lo.',
+          ephemeral: true 
+        });
+        return;
+      }
+
       await commands[commandName](interaction as ChatInputCommandInteraction);
     } catch (error) {
       console.error(`Erro ao executar comando ${commandName}:`, error);
