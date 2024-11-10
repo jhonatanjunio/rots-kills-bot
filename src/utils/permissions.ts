@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction } from 'discord.js';
-import config from '../config/config.json';
+import config from '../config';
 
 export async function hasManagerRole(interaction: ChatInputCommandInteraction): Promise<boolean> {
   if (!interaction.guild) return false;

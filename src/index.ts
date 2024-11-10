@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, IntentsBitField, Interaction, Options, Partials, ChatInputCommandInteraction } from 'discord.js';
-import config from './config/config.json';
+import config from './config';
 import { Database } from './services/database';
 import { commands, CommandName, registerCommands } from './commands';
 import { DeathMonitor } from './services/deathMonitor';

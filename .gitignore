@@ -1,6 +1,7 @@
 /executable
 /dist
 /node_modules
+src/config/config.development.json
 src/config/config.json
 src/config/_config.json
 config.json

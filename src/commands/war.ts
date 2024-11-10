@@ -90,13 +90,15 @@ async function calculateTeamStats(
 
     const kda = deaths === 0 ? kills + assists : (kills + assists) / deaths;    
 
-    playerStats.push({
-      name: player.name,
-      kills,
-      deaths,
-      assists,
-      kda: Number(formatKDA(kda))
-    });
+    if (kills > 0 || deaths > 0 || assists > 0 || kda > 0) {
+      playerStats.push({
+        name: player.name,
+        kills,
+        deaths,
+        assists,
+        kda: Number(formatKDA(kda))
+      });
+    }
   }
 
   // Ordena por KDA

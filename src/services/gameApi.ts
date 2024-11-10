@@ -1,11 +1,12 @@
 import fetch from 'node-fetch';
 import https from 'https';
-import config from '../config/config.json';
+import config from '../config';
 import { Database } from './database';
 import { Player } from '../models/Player';
 import { BrowserService } from './browserService';
 import { isFromToday } from '../utils/formatters';
 import { logtail } from '../utils/logtail';
+import { CookieManager } from './cookieManager';
 
 const agent = new https.Agent({
     rejectUnauthorized: false // Atenção: use apenas em ambiente de desenvolvimento
@@ -21,19 +22,27 @@ export class GameAPI {
     };
 
     private static async fetchWithRetry(url: string, options: any, retries = 3): Promise<any> {
+        const endpoint = new URL(url).pathname;
+        const cookieManager = CookieManager.getInstance();
+        
         for (let i = 0; i < retries; i++) {
+            await cookieManager.waitForCooldown(endpoint);
+            
             try {
                 const response = await fetch(url, {
                     ...options,
-                    agent,
-                    timeout: 10000 // 10 segundos timeout
+                    agent: cookieManager.getAgent(),
+                    timeout: 10000
                 });
+
+                // Extrai cookies da resposta
+                await cookieManager.extractCookiesFromResponse(response.headers);
+                
                 return response;
             } catch (error) {
                 console.error(`Tentativa ${i + 1} falhou:`, error);
-                logtail.error(`Tentativa ${i + 1} falhou: ${error}`);
                 if (i === retries - 1) throw error;
-                await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Espera crescente entre tentativas
+                await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
             }
         }
         throw new Error('Todas as tentativas falharam');

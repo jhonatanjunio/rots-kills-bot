@@ -1,6 +1,6 @@
 import { Logtail as LogtailService } from "@logtail/node";
 import { Context, StackContextHint, ILogtailLog } from "@logtail/types";
-import config from '../config/config.json';
+import config from '../config';
 
 export class Logtail extends LogtailService {
     public name?: string;

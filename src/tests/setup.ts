@@ -4,7 +4,7 @@ jest.mock('../services/browserService', () => ({
     BrowserService: require('./mocks/mockBrowserService').MockBrowserService
 }));
 
-jest.mock('../config/config.json', () => ({
+jest.mock('../config', () => ({
     discord: {
         token: 'mock-token',
         deathLogChannel: 'mock-channel'

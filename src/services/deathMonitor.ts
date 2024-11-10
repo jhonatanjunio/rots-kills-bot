@@ -1,7 +1,7 @@
 import { Client, TextChannel, EmbedBuilder } from 'discord.js';
 import { Database } from './database';
 import { GameAPI } from './gameApi';
-import config from '../config/config.json';
+import config from '../config';
 import { formatTimestamp } from '../utils/formatters';
 import { Player } from '../models/Player';
 import { isFromToday } from '../utils/formatters';

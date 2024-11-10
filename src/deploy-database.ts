@@ -4,9 +4,12 @@ import puppeteer from 'puppeteer';
 
 async function copyChromium() {
     try {
-        // Obtém o caminho do executável do Chromium usando a nova API
+        // Obtém o caminho do executável do Chromium
         const executablePath = puppeteer.executablePath();
         const chromiumPath = path.join('executable', '.local-chromium');
+        
+        console.log('📂 Copiando Chromium de:', executablePath);
+        console.log('📂 Para:', chromiumPath);
         
         // Cria diretório para o Chromium
         await fs.ensureDir(chromiumPath);

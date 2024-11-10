@@ -1,7 +1,8 @@
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import puppeteer from 'puppeteer-extra';
-import path from 'path';
 import { logtail } from '../utils/logtail';
+import config from '../config';
+import fetch from 'node-fetch';
+import { CookieManager } from './cookieManager';
+import { ChromeService } from './chromeService';
 
 export interface PlayerDataResponse {
   error: boolean;
@@ -29,58 +30,88 @@ export interface PlayerDataResponse {
 
 export class BrowserService {
   private static browser: any | null = null;
-  private static readonly API_URL = 'https://api.saiyansreturn.com';
+  private static cookieManager = CookieManager.getInstance();
+  private static fetchFailures = new Map<number, number>();
+  private static readonly MAX_FETCH_FAILURES = 3;
+  private static readonly API_URL = config.game.apiUrl;
+
+  private static async getHeaders(): Promise<Record<string, string>> {
+    const cfCookie = await this.cookieManager.getCookie();
+    return {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'Host': 'api.saiyansreturn.com',
+      'Connection': 'keep-alive',
+      ...(cfCookie ? { 'Cookie': `cf_clearance=${cfCookie}` } : {}),
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1'
+    };
+  }
+
+  private static async fetchWithRetry(url: string, options: any, retries = 3): Promise<any> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const response = await fetch(url, {
+          ...options,
+          agent: this.cookieManager.getAgent(),
+          timeout: 10000 // 10 segundos timeout
+        });
+        return response;
+      } catch (error) {
+        console.error(`Tentativa ${i + 1} falhou:`, error);
+        logtail.error(`Tentativa ${i + 1} falhou: ${error}`);
+        if (i === retries - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Espera crescente entre tentativas
+      }
+    }
+    throw new Error('Todas as tentativas falharam');
+  }
 
   private static async fetchPlayerData(playerId: number): Promise<PlayerDataResponse> {
     try {
-      const response = await fetch(
-        `${this.API_URL}/profile/${playerId}?server=Universe%20Supreme`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
-          }
-        }
-      );
+      const endpoint = `/profile/${playerId}`;
+      await this.cookieManager.waitForCooldown(endpoint);
+
+      const headers = await this.getHeaders();
+      const url = `${this.API_URL}${endpoint}?server=Universe%20Supreme`;
+      
+      const response = await this.fetchWithRetry(url, { 
+        headers,
+        agent: this.cookieManager.getAgent()
+      });
+
+      // Extrai cookies da resposta
+      await this.cookieManager.extractCookiesFromResponse(response.headers);
 
       if (!response.ok) {
+        const failures = (this.fetchFailures.get(playerId) || 0) + 1;
+        this.fetchFailures.set(playerId, failures);
+        
         throw new Error(`Erro na requisição: ${response.status}`);
       }
 
+      this.fetchFailures.delete(playerId);
+      
       const data: any = await response.json();
       return { error: false, data, method: 'fetch' };
     } catch (error) {
       console.error('Erro ao buscar dados via fetch:', error);
-      logtail.error(`Erro ao buscar dados: ${error}`);
       return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'fetch' };
     }
   }
 
   static async initialize() {
     if (!this.browser) {
-      puppeteer.use(StealthPlugin());
-
-      // Define o caminho do Chrome para Windows
-      const chromePath = path.join(process.cwd(), '.local-chromium', 'chrome.exe');
-
       try {
-        const browser = await puppeteer.launch({
-          headless: true,
-          executablePath: chromePath,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-infobars',
-            '--window-position=0,0',
-            '--ignore-certifcate-errors',
-            '--ignore-certifcate-errors-spki-list',
-          ],
-        });
-
-        this.browser = browser;
+        this.browser = await ChromeService.launchBrowser();
       } catch (error) {
-        console.error('Erro ao inicializar o browser:', error);
+        console.error('❌ Erro ao inicializar o browser:', error);
         logtail.error(`Erro ao inicializar o browser: ${error}`);
         throw error;
       }
@@ -89,15 +120,24 @@ export class BrowserService {
   }
 
   static async getPlayerData(playerId: number): Promise<PlayerDataResponse> {
-    try {
+    // Verifica se deve usar Puppeteer baseado no histórico de falhas
+    const shouldUsePuppeteer = (this.fetchFailures.get(playerId) || 0) >= this.MAX_FETCH_FAILURES;
+
+    if (!shouldUsePuppeteer) {
       // Tenta primeiro com fetch
       const fetchResult = await this.fetchPlayerData(playerId);
-      if (fetchResult && !fetchResult.error) {
+      if (!fetchResult.error) {
         return fetchResult;
       }
+    }
 
-      // Se falhar, usa o puppeteer como fallback
-      console.log('Fetch falhou, usando browser como fallback...');
+    // Fallback para Puppeteer
+    console.log('Usando Puppeteer como fallback...');
+    return this.getPuppeteerPlayerData(playerId);
+  }
+
+  private static async getPuppeteerPlayerData(playerId: number): Promise<PlayerDataResponse> {
+    try {
       const browser = await this.initialize();
       const page = await browser.newPage();
       
