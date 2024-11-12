@@ -1,5 +1,4 @@
 import fetch from 'node-fetch';
-import https from 'https';
 import config from '../config';
 import { Database } from './database';
 import { Player } from '../models/Player';
@@ -7,10 +6,6 @@ import { BrowserService } from './browserService';
 import { isFromToday } from '../utils/formatters';
 import { logtail } from '../utils/logtail';
 import { CookieManager } from './cookieManager';
-
-const agent = new https.Agent({
-    rejectUnauthorized: false // Atenção: use apenas em ambiente de desenvolvimento
-});
 
 export class GameAPI {
     private static headers = {
@@ -116,7 +111,7 @@ export class GameAPI {
                         level: death.level
                     };
 
-                    if (death.is_player === 1) {
+                    if (death.is_player === 1 || death.mostdamage_is_player === 1) {
                         await Database.addPlayerDeathLog(deathLog);
                     } else if (isFromToday(death.time)) {
                         await Database.addMonsterDeathLog(deathLog);
@@ -156,7 +151,7 @@ export class GameAPI {
             
             if (recentDeaths && recentDeaths.length > 0) {
                 deaths = recentDeaths
-                    .filter((death: any) => death.is_player === 1)
+                    .filter((death: any) => death.is_player === 1 || death.mostdamage_is_player === 1)
                     .map((death: any) => ({
                         playerName: player.name,
                         killed_by: death.killed_by,
@@ -254,7 +249,7 @@ export class GameAPI {
                 level: death.level
             };
 
-            if (death.is_player === 1) {
+            if (death.is_player === 1 || death.mostdamage_is_player === 1) {
                 await Database.addPlayerDeathLog(deathLog);
             } else {
                 await Database.addMonsterDeathLog(deathLog);

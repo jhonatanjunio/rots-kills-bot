@@ -19,13 +19,6 @@ export class ImageGenerator {
         );
     }
 
-    private static async loadFonts() {
-        return {
-            regular: await readFileSync(join(__dirname, '../../assets/fonts/Inter-Medium.ttf')),
-            bold: await readFileSync(join(__dirname, '../../assets/fonts/Inter-Bold.ttf')),
-        };
-    }
-
     static async generateWarStats(
         period: string,
         allyStats: TeamStats,

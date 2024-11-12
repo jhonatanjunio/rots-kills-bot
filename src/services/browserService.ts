@@ -19,6 +19,7 @@ export interface PlayerDataResponse {
     deaths?: {
       deaths: Array<{
         is_player: number;
+        mostdamage_is_player: number;
         killed_by: string;
         mostdamage_by: string;
         time: number;
