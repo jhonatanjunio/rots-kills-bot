@@ -11,12 +11,11 @@ export class DeathMonitor {
   private static instance: DeathMonitor;
   private monitorInterval: NodeJS.Timeout | null = null;
   private lastChecks: Map<string, number> = new Map();
-  private readonly CHECK_INTERVAL = 60000; // 1 minuto
-  private readonly BATCH_SIZE = 3; // Número de jogadores verificados por intervalo
-  private readonly BATCH_DELAY = 2000; // 2 segundos entre cada jogador do batch
-  private readonly MAX_REQUESTS_PER_MINUTE = 30;
-  private requestCount = 0;
-  private lastResetTime = Date.now();
+  private readonly BASE_INTERVAL = 150000; // 2.5 minutos
+  private readonly BATCH_SIZE = 20; // 20 jogadores por lote
+  private readonly MAX_CONCURRENT_TABS = 15; // Máximo de abas simultâneas
+  private currentInterval: number = this.BASE_INTERVAL;
+  private processingTimes: number[] = [];
 
   constructor(private client: Client) {}
 
@@ -30,85 +29,151 @@ export class DeathMonitor {
   async start() {
     if (this.monitorInterval) return;
 
-    this.monitorInterval = setInterval(async () => {
-      await this.checkBatch();
-    }, this.CHECK_INTERVAL);
+    // Primeira execução imediata
+    await this.processAllPlayers();
 
-    console.log('Monitor de mortes iniciado');
+    // Configura o intervalo dinâmico
+    this.monitorInterval = setInterval(async () => {
+      await this.processAllPlayers();
+    }, this.currentInterval);
+
+    console.log('Monitor de mortes iniciado com intervalo dinâmico');
   }
 
-  private async checkBatch() {
+  private async processAllPlayers() {
     try {
+      const startTime = Date.now();
       const players = await Database.getAllMonitoredPlayers();
-      const existingPlayerDeathLogs = await Database.getAllPlayerDeathLogs();
-      const existingMonsterDeathLogs = await Database.getAllMonsterDeathLogs();
+      const totalPlayers = players.length;
+      
+      logtail.info(`🔄 Iniciando processamento de ${totalPlayers} jogadores`);
 
-      for (const player of players) {
-        try {
-          console.log(`🔍 Monitorando: ${player.name}`);
-          const { player: updatedPlayer, deaths } = await GameAPI.getPlayerInfo(player.name);
+      // Divide os jogadores em lotes
+      const batches = this.createBatches(players, this.BATCH_SIZE);
+      
+      for (const batch of batches) {
+        const batchStartTime = Date.now();
+        await this.processBatchWithConcurrency(batch);
+        
+        const batchProcessingTime = Date.now() - batchStartTime;
+        this.updateProcessingMetrics(batchProcessingTime, batch.length);
+      }
 
-          if (updatedPlayer) {
-            await this.checkVocationChange(player, updatedPlayer.vocation);
-          }
+      const totalProcessingTime = Date.now() - startTime;
+      this.adjustInterval(totalProcessingTime, totalPlayers);
 
-          if (deaths && deaths.length > 0) {
-            const playerDeaths = deaths.filter((death: any) => death.is_player === 1);
-            const monsterDeaths = deaths.filter((death: any) => 
-              death.is_player === 0 && isFromToday(death.time)
-            );
-            const lastCheck = this.lastChecks.get(player.id.toString()) || 0;
-            const lastCheckInSeconds = Math.floor(lastCheck / 1000);
+      logtail.info(`✅ Processamento completo em ${totalProcessingTime}ms`);
+      logtail.info(`⏱️ Próxima verificação em ${this.currentInterval / 1000}s`);
 
-            const newPlayerDeaths = playerDeaths.filter((death: any) => {
-              if (death.time <= lastCheckInSeconds) return false;
+    } catch (error) {
+      logtail.error(`❌ Erro no processamento: ${error}`);
+    }
+  }
 
-              const deathExists = existingPlayerDeathLogs.some((log: any) => 
-                log.playerName === player.name &&
-                log.timestamp === death.time &&
-                log.killed_by === death.killed_by &&
-                log.mostdamage_by === death.mostdamage_by &&
-                log.level === death.level
-              );
+  private async processBatchWithConcurrency(players: Player[]) {
+    const chunks = this.createBatches(players, this.MAX_CONCURRENT_TABS);
+    
+    for (const chunk of chunks) {
+      await Promise.all(
+        chunk.map(player => this.processPlayer(player))
+      );
+    }
+  }
 
-              return !deathExists;
-            });
+  private createBatches<T>(items: T[], size: number): T[][] {
+    const batches: T[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+      batches.push(items.slice(i, i + size));
+    }
+    return batches;
+  }
 
-            const newMonsterDeaths = monsterDeaths.filter((death: any) => {
-              if (death.time <= lastCheckInSeconds) return false;
+  private updateProcessingMetrics(processingTime: number, batchSize: number) {
+    const timePerPlayer = processingTime / batchSize;
+    this.processingTimes.push(timePerPlayer);
+    
+    // Mantém apenas as últimas 10 medições
+    if (this.processingTimes.length > 10) {
+      this.processingTimes.shift();
+    }
+  }
 
-              const deathExists = existingMonsterDeathLogs.some((log: any) => 
-                log.playerName === player.name &&
-                log.timestamp === death.time &&
-                log.killed_by === death.killed_by &&
-                log.mostdamage_by === death.mostdamage_by &&
-                log.level === death.level
-              );
+  private adjustInterval(totalTime: number, totalPlayers: number) {
+    const averageTimePerPlayer = this.processingTimes.reduce((a, b) => a + b, 0) / this.processingTimes.length;
+    const estimatedTotalTime = averageTimePerPlayer * totalPlayers;
+    
+    // Ajusta o intervalo baseado no tempo de processamento
+    const idealInterval = Math.max(
+      this.BASE_INTERVAL,
+      Math.min(estimatedTotalTime * 1.2, 300000) // Máximo de 5 minutos
+    );
 
-              return !deathExists;
-            });
+    this.currentInterval = Math.round(idealInterval);
+    
+    if (this.monitorInterval) {
+      clearInterval(this.monitorInterval);
+      this.monitorInterval = setInterval(async () => {
+        await this.processAllPlayers();
+      }, this.currentInterval);
+    }
+  }
 
-            if (newPlayerDeaths.length > 0) {
-              console.log(`⚠️ Nova morte detectada para ${player.name}`);
-              await this.processNewDeaths(player, newPlayerDeaths);
-            }
+  private async processPlayer(player: Player) {
+    try {
+      console.log(`🔍 Monitorando: ${player.name}`);
+      const { player: updatedPlayer, deaths } = await GameAPI.getPlayerInfo(player.name);
 
-            if (newMonsterDeaths.length > 0) {
-              console.log(`⚠️ Nova morte por monstro detectada para ${player.name}`);
-              await this.processNewMonsterDeaths(player, newMonsterDeaths);
-            }
-          }
+      if (updatedPlayer) {
+        await this.checkVocationChange(player, updatedPlayer.vocation);
+      }
 
-          this.lastChecks.set(player.id.toString(), Date.now());
-        } catch (error) {
-          console.error(`❌ Erro ao verificar jogador ${player.name}:`, error);
-          logtail.error(`Erro ao verificar jogador ${player.name}: ${error}`);
+      if (deaths && deaths.length > 0) {
+        const playerDeaths = deaths.filter((death: any) => death.is_player === 1);
+        const monsterDeaths = deaths.filter((death: any) => 
+          death.is_player === 0 && isFromToday(death.time)
+        );
+
+        const lastCheck = this.lastChecks.get(player.id.toString()) || 0;
+        const lastCheckInSeconds = Math.floor(lastCheck / 1000);
+
+        const existingPlayerDeathLogs = await Database.getAllPlayerDeathLogs();
+        const existingMonsterDeathLogs = await Database.getAllMonsterDeathLogs();
+
+        const newPlayerDeaths = playerDeaths.filter((death: any) => {
+          if (death.time <= lastCheckInSeconds) return false;
+          return !this.deathExists(death, player.name, existingPlayerDeathLogs);
+        });
+
+        const newMonsterDeaths = monsterDeaths.filter((death: any) => {
+          if (death.time <= lastCheckInSeconds) return false;
+          return !this.deathExists(death, player.name, existingMonsterDeathLogs);
+        });
+
+        if (newPlayerDeaths.length > 0) {
+          console.log(`⚠️ Nova morte detectada para ${player.name}`);
+          await this.processNewDeaths(player, newPlayerDeaths);
+        }
+
+        if (newMonsterDeaths.length > 0) {
+          console.log(`⚠️ Nova morte por monstro detectada para ${player.name}`);
+          await this.processNewMonsterDeaths(player, newMonsterDeaths);
         }
       }
+
+      this.lastChecks.set(player.id.toString(), Date.now());
     } catch (error) {
-      console.error('❌ Erro no checkBatch:', error);
-      logtail.error(`Erro no checkBatch: ${error}`);
+      logtail.error(`❌ Erro ao processar jogador ${player.name}: ${error}`);
     }
+  }
+
+  private deathExists(death: any, playerName: string, existingLogs: any[]): boolean {
+    return existingLogs.some(log => 
+      log.playerName === playerName &&
+      log.timestamp === death.time &&
+      log.killed_by === death.killed_by &&
+      log.mostdamage_by === death.mostdamage_by &&
+      log.level === death.level
+    );
   }
 
   private async checkVocationChange(oldPlayer: Player, newVocation: number) {
@@ -242,20 +307,5 @@ export class DeathMonitor {
       this.monitorInterval = null;
       console.log('Monitor de mortes parado');
     }
-  }
-
-  private async checkRateLimit(): Promise<boolean> {
-    const now = Date.now();
-    if (now - this.lastResetTime >= 60000) {
-      this.requestCount = 0;
-      this.lastResetTime = now;
-    }
-    
-    if (this.requestCount >= this.MAX_REQUESTS_PER_MINUTE) {
-      return false;
-    }
-    
-    this.requestCount++;
-    return true;
   }
 } 

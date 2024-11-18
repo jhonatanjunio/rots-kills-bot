@@ -91,13 +91,6 @@ export const commandsData = [
         .setDescription('Período (ex: 1h, 30m, 2h 30m)')
         .setRequired(true)
     )
-    .addIntegerOption(option =>
-      option
-        .setName('page')
-        .setDescription('Página das estatísticas (use apenas se houver mais de 10 jogadores)')
-        .setMinValue(1)
-        .setRequired(false)
-    ),
 ] as const;
 
 // Mapeamento dos comandos para suas funções executoras

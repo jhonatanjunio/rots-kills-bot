@@ -82,7 +82,6 @@ async function calculateTeamStats(
     const assists = deathLogs.filter(
       log => {
         const isMatch = log.mostdamage_by.toLowerCase() === player.name.toLowerCase() &&
-          log.killed_by.toLowerCase() !== player.name.toLowerCase() &&
           log.timestamp >= startTimestamp;        
         return isMatch;
       }
@@ -125,7 +124,6 @@ export async function war(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply();
     
     const periodStr = interaction.options.getString('period', true);
-    const page = interaction.options.getInteger('page') || 1;
     const period = parsePeriod(periodStr);
     
     const now = moment().tz('America/Sao_Paulo');
@@ -140,20 +138,16 @@ export async function war(interaction: ChatInputCommandInteraction) {
     const allyStats = await calculateTeamStats(allyPlayers, deathLogs, startTimestamp);
     const enemyStats = await calculateTeamStats(enemyPlayers, deathLogs, startTimestamp);
 
-    const { buffer, totalPages } = await ImageGenerator.generateWarStats(
+    const { buffer } = await ImageGenerator.generateWarStats(
       period.humanReadable,
       allyStats,
-      enemyStats,
-      page
+      enemyStats
     );
 
     const attachment = new AttachmentBuilder(buffer, { name: 'war-stats.png' });
 
-    // Só mostra a informação de página se houver mais de uma página
-    const pageInfo = totalPages > 1 ? `\nPágina ${page}/${totalPages}` : '';
-
     await interaction.editReply({
-      content: `Estatísticas de Guerra - ${period.humanReadable}${pageInfo}`,
+      content: `Estatísticas de Guerra - ${period.humanReadable}`,
       files: [attachment]
     });
 

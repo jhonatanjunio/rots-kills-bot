@@ -8,6 +8,28 @@ import { PlayerKDA } from '../models/Ranking';
 export class ImageGenerator {
     private static readonly PLAYERS_PER_PAGE = 10;
     
+    private static readonly COLORS = {
+        TEXT: '#FFFFFF',
+        BACKGROUND: '#2F3136',
+        SECONDARY_BG: '#36393F',
+        BORDER: '#4F545C',
+        SUBTEXT: '#B9BBBE',
+        ALLY: '#4ade80',
+        ENEMY: '#f87171',
+        GOLD: '#FFD700',
+        SILVER: '#C0C0C0',
+        BRONZE: '#CD7F32',
+        ROW_BG_1: '#2b2d31',
+        ROW_BG_2: '#2b2d31',
+        ROW_BG_3: '#2b2d31',
+    };
+    
+    private static readonly MEDALS = {
+        FIRST: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f947.svg',
+        SECOND: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f948.svg',
+        THIRD: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f949.svg'
+    };
+    
     private static initializeFonts() {
         GlobalFonts.registerFromPath(
             join(__dirname, '../../assets/fonts/Inter-Medium.ttf'),
@@ -22,28 +44,9 @@ export class ImageGenerator {
     static async generateWarStats(
         period: string,
         allyStats: TeamStats,
-        enemyStats: TeamStats,
-        page: number = 1
-    ): Promise<{ buffer: Buffer; totalPages: number }> {
+        enemyStats: TeamStats
+    ): Promise<{ buffer: Buffer }> {
         this.initializeFonts();
-
-        // Calcula o total de páginas baseado no maior número de jogadores
-        const maxPlayers = Math.max(allyStats.players.length, enemyStats.players.length);
-        const totalPages = Math.ceil(maxPlayers / this.PLAYERS_PER_PAGE);
-
-        // Pagina os jogadores se necessário
-        const startIndex = (page - 1) * this.PLAYERS_PER_PAGE;
-        const endIndex = startIndex + this.PLAYERS_PER_PAGE;
-
-        const paginatedAllyStats = {
-            ...allyStats,
-            players: allyStats.players.slice(startIndex, endIndex)
-        };
-
-        const paginatedEnemyStats = {
-            ...enemyStats,
-            players: enemyStats.players.slice(startIndex, endIndex)
-        };
 
         // Constantes para cálculo de altura
         const HEADER_HEIGHT = 80;  // Título principal
@@ -53,50 +56,32 @@ export class ImageGenerator {
         const PADDING_TOP = 40; // Padding superior
         const PADDING_BOTTOM = 40; // Padding inferior
         const SECTION_PADDING = 20; // Padding entre seções
-        const EXTRA_SPACE = 100; // Espaço extra para garantir que nada seja cortado
 
-        // Pega o número real de jogadores na página atual
-        const currentPagePlayersCount = Math.max(
-            paginatedAllyStats.players.length,
-            paginatedEnemyStats.players.length
+        // Pega o número real de jogadores
+        const maxPlayers = Math.max(
+            allyStats.players.length,
+            enemyStats.players.length
         );
 
         // Calcula a altura total necessária
         const contentHeight = HEADER_HEIGHT + // Título
                             PADDING_TOP + // Padding superior
                             TEAM_HEADER_HEIGHT + // Cabeçalho dos times
-                            (ROW_HEIGHT * currentPagePlayersCount) + // Linhas de jogadores
+                            (ROW_HEIGHT * maxPlayers) + // Linhas de jogadores
                             SECTION_PADDING + // Espaço entre a lista e o footer
                             FOOTER_HEIGHT + // Rodapé
-                            PADDING_BOTTOM + // Padding inferior
-                            EXTRA_SPACE; // Espaço extra de segurança
+                            PADDING_BOTTOM; // Padding inferior
 
         const canvas = createCanvas(1024, contentHeight);
         const ctx = canvas.getContext('2d');
 
-        const COLORS = {
-            TEXT: '#FFFFFF',
-            BACKGROUND: '#2F3136',
-            SECONDARY_BG: '#36393F',
-            BORDER: '#4F545C',
-            SUBTEXT: '#B9BBBE',
-            GOLD: '#FFD700',
-            SILVER: '#C0C0C0',
-            BRONZE: '#CD7F32',
-            ROW_BG_1: '#2b2d31',
-            ROW_BG_2: '#2b2d31',
-            ROW_BG_3: '#2b2d31',
-            ALLY: '#4ade80',
-            ENEMY: '#f87171',
-        };
-
-        // Desenha o fundo
-        ctx.fillStyle = COLORS.BACKGROUND;
+        // Desenha o fundo principal
+        ctx.fillStyle = this.COLORS.BACKGROUND;
         ctx.fillRect(0, 0, 1024, contentHeight);
 
         // Desenha o título
         ctx.font = 'bold 24px Inter';
-        ctx.fillStyle = COLORS.TEXT;
+        ctx.fillStyle = this.COLORS.TEXT;
         ctx.textAlign = 'center';
         ctx.fillText(`Estatísticas de Guerra - ${period}`, 512, 50);
 
@@ -105,19 +90,16 @@ export class ImageGenerator {
         const teamWidth = 482; // (1024 - 60) / 2
 
         // Time aliado (esquerda)
-        this.drawTeamStats(ctx, 'No Fear to Kill', paginatedAllyStats, COLORS.ALLY, 20, mainY, teamWidth);
+        this.drawTeamStats(ctx, 'No Fear to Kill', allyStats, this.COLORS.ALLY, 20, mainY, teamWidth);
 
         // Divisor central
-        ctx.fillStyle = COLORS.BORDER;
+        ctx.fillStyle = this.COLORS.BORDER;
         ctx.fillRect(512, mainY, 2, contentHeight - HEADER_HEIGHT - PADDING_BOTTOM);
 
         // Time inimigo (direita)
-        this.drawTeamStats(ctx, 'Inimigos', paginatedEnemyStats, COLORS.ENEMY, 522, mainY, teamWidth);
+        this.drawTeamStats(ctx, 'Inimigos', enemyStats, this.COLORS.ENEMY, 522, mainY, teamWidth);
 
-        return {
-            buffer: canvas.toBuffer('image/png'),
-            totalPages: maxPlayers > this.PLAYERS_PER_PAGE ? totalPages : 1
-        };
+        return { buffer: canvas.toBuffer('image/png') };
     }
 
     private static drawTeamStats(
@@ -129,9 +111,14 @@ export class ImageGenerator {
         y: number,
         width: number
     ) {
-        // Desenha o fundo da seção
-        ctx.fillStyle = '#36393F';
-        ctx.fillRect(x, y, width, 400);
+        // Desenha o fundo da seção completa
+        const sectionHeight = 60 + // Título e padding
+                             40 + // Header
+                             (stats.players.length * 40) + // Linhas de jogadores
+                             60; // Footer e padding
+        
+        ctx.fillStyle = this.COLORS.SECONDARY_BG;
+        ctx.fillRect(x, y, width, sectionHeight);
 
         // Título do time
         ctx.font = 'bold 20px Inter';
@@ -141,12 +128,12 @@ export class ImageGenerator {
 
         // Cabeçalho da tabela
         const headerY = y + 60;
-        ctx.fillStyle = '#2F3136';
+        ctx.fillStyle = this.COLORS.BACKGROUND;
         ctx.fillRect(x + 10, headerY, width - 20, 40);
 
         // Colunas do cabeçalho
         ctx.font = '14px Inter';
-        ctx.fillStyle = '#B9BBBE';
+        ctx.fillStyle = this.COLORS.SUBTEXT;
         ctx.textAlign = 'left';
         ctx.fillText('Jogador', x + 20, headerY + 25);
 
@@ -177,9 +164,9 @@ export class ImageGenerator {
             rowY += 40;
         });
 
-        // Rodapé com totais
-        const footerY = rowY + 20;
-        ctx.fillStyle = '#2F3136';
+        // Rodapé com totais (agora com fundo mais escuro)
+        const footerY = headerY + 40 + (stats.players.length * 40) + 20;
+        ctx.fillStyle = this.COLORS.BACKGROUND;
         ctx.fillRect(x + 10, footerY, width - 20, 40);
 
         ctx.font = 'bold 14px Inter';
@@ -197,231 +184,6 @@ export class ImageGenerator {
             ctx.textAlign = 'center';
             ctx.fillText(value.toString(), x + 150 + (columnWidth * index) + columnWidth/2, footerY + 25);
         });
-    }
-
-    private static createTeamSection(
-        title: string,
-        stats: TeamStats,
-        color: string
-    ) {
-        return {
-            type: 'div',
-            props: {
-                style: {
-                    display: 'flex',
-                    flexDirection: 'column',
-                    flex: 1,
-                    backgroundColor: '#36393F',
-                    borderRadius: '8px',
-                    padding: '15px'
-                },
-                children: [
-                    {
-                        type: 'div',
-                        props: {
-                            style: {
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '20px',
-                                color,
-                                marginBottom: '15px',
-                                fontWeight: 'bold'
-                            },
-                            children: [title]
-                        }
-                    },
-                    // Header
-                    {
-                        type: 'div',
-                        props: {
-                            style: {
-                                display: 'flex',
-                                padding: '8px',
-                                backgroundColor: '#2F3136',
-                                borderRadius: '4px',
-                                marginBottom: '10px'
-                            },
-                            children: [
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            flex: '2',
-                                            color: '#B9BBBE',
-                                            fontSize: '14px'
-                                        },
-                                        children: 'Jogador'
-                                    }
-                                },
-                                ...['K', 'D', 'A', 'KDA'].map(text => ({
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            flex: '1',
-                                            color: '#B9BBBE',
-                                            fontSize: '14px',
-                                            textAlign: 'center'
-                                        },
-                                        children: text
-                                    }
-                                }))
-                            ]
-                        }
-                    },
-                    // Player Rows Container
-                    {
-                        type: 'div',
-                        props: {
-                            style: {
-                                display: 'flex',
-                                flexDirection: 'column'
-                            },
-                            children: stats.players.map(player => ({
-                                type: 'div',
-                                props: {
-                                    style: {
-                                        display: 'flex',
-                                        padding: '8px',
-                                        borderBottom: '1px solid #4F545C'
-                                    },
-                                    children: [
-                                        {
-                                            type: 'div',
-                                            props: {
-                                                style: {
-                                                    flex: '2',
-                                                    fontSize: '14px'
-                                                },
-                                                children: player.name
-                                            }
-                                        },
-                                        {
-                                            type: 'div',
-                                            props: {
-                                                style: {
-                                                    flex: '1',
-                                                    textAlign: 'center',
-                                                    fontSize: '14px'
-                                                },
-                                                children: player.kills.toString()
-                                            }
-                                        },
-                                        {
-                                            type: 'div',
-                                            props: {
-                                                style: {
-                                                    flex: '1',
-                                                    textAlign: 'center',
-                                                    fontSize: '14px'
-                                                },
-                                                children: player.deaths.toString()
-                                            }
-                                        },
-                                        {
-                                            type: 'div',
-                                            props: {
-                                                style: {
-                                                    flex: '1',
-                                                    textAlign: 'center',
-                                                    fontSize: '14px'
-                                                },
-                                                children: player.assists.toString()
-                                            }
-                                        },
-                                        {
-                                            type: 'div',
-                                            props: {
-                                                style: {
-                                                    flex: '1',
-                                                    textAlign: 'center',
-                                                    fontSize: '14px'
-                                                },
-                                                children: player.kda.toFixed(2)
-                                            }
-                                        }
-                                    ]
-                                }
-                            }))
-                        }
-                    },
-                    // Totals
-                    {
-                        type: 'div',
-                        props: {
-                            style: {
-                                display: 'flex',
-                                padding: '8px',
-                                marginTop: '10px',
-                                backgroundColor: '#2F3136',
-                                borderRadius: '4px'
-                            },
-                            children: [
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            flex: '2',
-                                            fontWeight: 'bold',
-                                            fontSize: '14px'
-                                        },
-                                        children: 'Total'
-                                    }
-                                },
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            flex: '1',
-                                            textAlign: 'center',
-                                            fontWeight: 'bold',
-                                            fontSize: '14px'
-                                        },
-                                        children: stats.totalKills.toString()
-                                    }
-                                },
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            flex: '1',
-                                            textAlign: 'center',
-                                            fontWeight: 'bold',
-                                            fontSize: '14px'
-                                        },
-                                        children: stats.totalDeaths.toString()
-                                    }
-                                },
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            flex: '1',
-                                            textAlign: 'center',
-                                            fontWeight: 'bold',
-                                            fontSize: '14px'
-                                        },
-                                        children: stats.totalAssists.toString()
-                                    }
-                                },
-                                {
-                                    type: 'div',
-                                    props: {
-                                        style: {
-                                            flex: '1',
-                                            textAlign: 'center',
-                                            fontWeight: 'bold',
-                                            fontSize: '14px'
-                                        },
-                                        children: stats.averageKDA.toFixed(2)
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
-        };
     }
 
     static async generateRankingStats(
@@ -447,49 +209,31 @@ export class ImageGenerator {
                             TABLE_HEADER_HEIGHT + 
                             (ROW_HEIGHT * paginatedStats.length) + 
                             PADDING;
+        
 
-        const COLORS = {
-            TEXT: '#FFFFFF',
-            BACKGROUND: '#2F3136',
-            SECONDARY_BG: '#36393F',
-            BORDER: '#4F545C',
-            SUBTEXT: '#B9BBBE',
-            GOLD: '#FFD700',
-            SILVER: '#C0C0C0',
-            BRONZE: '#CD7F32',
-            ROW_BG_1: '#2b2d31',
-            ROW_BG_2: '#2b2d31',
-            ROW_BG_3: '#2b2d31',
-        };
-
-        const MEDALS = {
-            FIRST: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f947.svg',
-            SECOND: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f948.svg',
-            THIRD: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f949.svg'
-        };
 
         const canvas = createCanvas(1024, contentHeight);
         const ctx = canvas.getContext('2d');
 
         // Desenha o fundo
-        ctx.fillStyle = COLORS.BACKGROUND;
+        ctx.fillStyle = this.COLORS.BACKGROUND;
         ctx.fillRect(0, 0, 1024, contentHeight);
 
         // Desenha o título
         ctx.font = 'bold 24px Inter';
-        ctx.fillStyle = COLORS.TEXT;
+        ctx.fillStyle = this.COLORS.TEXT;
         ctx.textAlign = 'center';
         ctx.fillText(`Ranking de Guerreiros - ${period}`, 512, 50);
 
         // Container da tabela
         const tableY = HEADER_HEIGHT;
-        ctx.fillStyle = COLORS.SECONDARY_BG;
+        ctx.fillStyle = this.COLORS.SECONDARY_BG;
         ctx.fillRect(20, tableY, 984, contentHeight - HEADER_HEIGHT - 20);
 
         // Cabeçalho da tabela usando createRankingHeader
         const headerY = tableY + 20;
         const header = this.createRankingHeader();
-        ctx.fillStyle = COLORS.BACKGROUND;
+        ctx.fillStyle = this.COLORS.BACKGROUND;
         ctx.fillRect(30, headerY, 964, 40);
 
         // Desenha as colunas do cabeçalho usando os dados do header
@@ -497,7 +241,7 @@ export class ImageGenerator {
         let xPos = 30;
         header.props.children.forEach((headerCol: any, index: number) => {
             ctx.font = '14px Inter';
-            ctx.fillStyle = COLORS.SUBTEXT;
+            ctx.fillStyle = this.COLORS.SUBTEXT;
             ctx.textAlign = index === 1 ? 'left' : 'center';
             const textX = index === 1 ? xPos + 10 : xPos + columnWidths[index]/2;
             ctx.fillText(headerCol.props.children[0], textX, headerY + 25);
@@ -506,9 +250,9 @@ export class ImageGenerator {
 
         // Pré-carrega as imagens das medalhas
         const medalImages = {
-            FIRST: await loadImage(MEDALS.FIRST),
-            SECOND: await loadImage(MEDALS.SECOND),
-            THIRD: await loadImage(MEDALS.THIRD)
+            FIRST: await loadImage(this.MEDALS.FIRST),
+            SECOND: await loadImage(this.MEDALS.SECOND),
+            THIRD: await loadImage(this.MEDALS.THIRD)
         };
 
         // Linhas dos jogadores usando createRankingRow
@@ -538,7 +282,7 @@ export class ImageGenerator {
                         : cell.props.children[0].toString();
                     
                     ctx.font = '14px Inter';
-                    ctx.fillStyle = cell.props.style.color || COLORS.TEXT;
+                    ctx.fillStyle = cell.props.style.color || this.COLORS.TEXT;
                     ctx.textAlign = index === 1 ? 'left' : 'center';
                     const textX = index === 1 ? xPos + 10 : xPos + columnWidths[index]/2;
                     ctx.fillText(text, textX, rowY + 25);
@@ -547,7 +291,7 @@ export class ImageGenerator {
             });
 
             // Linha divisória
-            ctx.fillStyle = COLORS.BORDER;
+            ctx.fillStyle = this.COLORS.BORDER;
             ctx.fillRect(30, rowY + 39, 964, 1);
 
             rowY += 40;
@@ -616,27 +360,21 @@ export class ImageGenerator {
 
     private static createRankingRow(player: PlayerKDA, position: number) {
 
-        const MEDALS = {
-            FIRST: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f947.svg',  // Substitua com URLs reais
-            SECOND: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f948.svg', // das imagens que você
-            THIRD: 'https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f949.svg'   // vai usar
-        };
-
         const POSITION_STYLES = {
             1: {
-                color: '#FFD700',
-                background: '#2b2d31',
-                image: MEDALS.FIRST
+                color: this.COLORS.GOLD,
+                background: this.COLORS.ROW_BG_1,
+                image: this.MEDALS.FIRST
             },
             2: {
-                color: '#C0C0C0',
-                background: '#2b2d31',
-                image: MEDALS.SECOND
+                color: this.COLORS.SILVER,
+                background: this.COLORS.ROW_BG_2,
+                image: this.MEDALS.SECOND
             },
             3: {
-                color: '#CD7F32',
-                background: '#2b2d31',
-                image: MEDALS.THIRD
+                color: this.COLORS.BRONZE,
+                background: this.COLORS.ROW_BG_3,
+                image: this.MEDALS.THIRD
             }
         };
 
@@ -648,7 +386,7 @@ export class ImageGenerator {
                 style: {
                     display: 'flex',
                     padding: '8px',
-                    borderBottom: '1px solid #4F545C',
+                    borderBottom: `1px solid ${this.COLORS.BORDER}`,
                     backgroundColor: style ? style.background : 'transparent'
                 },
                 children: [
