@@ -16,6 +16,7 @@ export class DeathMonitor {
   private readonly MAX_CONCURRENT_TABS = 15; // Máximo de abas simultâneas
   private currentInterval: number = this.BASE_INTERVAL;
   private processingTimes: number[] = [];
+  private lastSuccessfulRun: number = Date.now();
 
   constructor(private client: Client) {}
 
@@ -29,15 +30,21 @@ export class DeathMonitor {
   async start() {
     if (this.monitorInterval) return;
 
+    const runMonitor = async () => {
+      try {
+        await this.processAllPlayers();
+      } catch (error) {
+        logtail.error(`❌ Erro crítico no monitor: ${error}`);
+      } finally {
+        // Garante que o próximo intervalo seja sempre agendado
+        this.monitorInterval = setTimeout(runMonitor, this.currentInterval);
+      }
+    };
+
     // Primeira execução imediata
-    await this.processAllPlayers();
+    await runMonitor();
 
-    // Configura o intervalo dinâmico
-    this.monitorInterval = setInterval(async () => {
-      await this.processAllPlayers();
-    }, this.currentInterval);
-
-    console.log('Monitor de mortes iniciado com intervalo dinâmico');
+    logtail.info('Monitor de mortes iniciado com intervalo dinâmico');
   }
 
   private async processAllPlayers() {
@@ -62,11 +69,13 @@ export class DeathMonitor {
       const totalProcessingTime = Date.now() - startTime;
       this.adjustInterval(totalProcessingTime, totalPlayers);
 
-      logtail.info(`✅ Processamento completo em ${totalProcessingTime}ms`);
+      this.lastSuccessfulRun = Date.now();
+      logtail.info(`✅ Processamento completo em ${Date.now() - startTime}ms`);
       logtail.info(`⏱️ Próxima verificação em ${this.currentInterval / 1000}s`);
 
     } catch (error) {
       logtail.error(`❌ Erro no processamento: ${error}`);
+      throw error; // Propaga o erro para ser tratado no start()
     }
   }
 
@@ -103,19 +112,12 @@ export class DeathMonitor {
     const estimatedTotalTime = averageTimePerPlayer * totalPlayers;
     
     // Ajusta o intervalo baseado no tempo de processamento
-    const idealInterval = Math.max(
+    this.currentInterval = Math.round(Math.max(
       this.BASE_INTERVAL,
       Math.min(estimatedTotalTime * 1.2, 300000) // Máximo de 5 minutos
-    );
-
-    this.currentInterval = Math.round(idealInterval);
+    ));
     
-    if (this.monitorInterval) {
-      clearInterval(this.monitorInterval);
-      this.monitorInterval = setInterval(async () => {
-        await this.processAllPlayers();
-      }, this.currentInterval);
-    }
+    logtail.info(`Intervalo ajustado para ${this.currentInterval}ms`);
   }
 
   private async processPlayer(player: Player) {
@@ -307,5 +309,10 @@ export class DeathMonitor {
       this.monitorInterval = null;
       console.log('Monitor de mortes parado');
     }
+  }
+
+  public isHealthy(): boolean {
+    const maxAllowedGap = this.currentInterval * 2; // Permite um gap de 2x o intervalo
+    return Date.now() - this.lastSuccessfulRun <= maxAllowedGap;
   }
 } 

@@ -3,6 +3,7 @@ import config from './config';
 import { Database } from './services/database';
 import { commands, CommandName, registerCommands } from './commands';
 import { DeathMonitor } from './services/deathMonitor';
+import { HealthMonitor } from './services/healthMonitor';
 import { hasManagerRole } from './utils/permissions';
 require('dotenv').config();
 const client = new Client({
@@ -30,7 +31,9 @@ client.once('ready', async () => {
   await Database.load();
   await registerCommands(client);
   const deathMonitor = DeathMonitor.initialize(client);
+  const healthMonitor = HealthMonitor.initialize(deathMonitor);
   await deathMonitor.start();
+  healthMonitor.start();
 });
 
 client.on('interactionCreate', async (interaction: Interaction) => {
