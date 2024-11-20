@@ -33,10 +33,11 @@ export class Database {
       const content = await fs.readFile(this.DB_PATH, 'utf-8');
       const loadedData = JSON.parse(content);
       this.data.players = loadedData.players;
-    } catch {
-      this.data.players = [];
-      logtail.error('Erro ao carregar dados do banco de dados');
-      await this.save();
+    } catch (error) {
+      logtail.error(`Erro ao carregar dados do banco de dados: ${error}`);
+      if (this.data.players.length > 0) {
+        await this.save();
+      }
     }
 
     try {
@@ -46,11 +47,11 @@ export class Database {
       this.data.playerDeathLogsIndex = new Set(
         this.data.playerDeathLogs.map(this.createDeathLogHash)
       );
-    } catch {
-      this.data.playerDeathLogs = [];
-      this.data.playerDeathLogsIndex = new Set();
-      logtail.error('Erro ao carregar dados dos logs de mortes dos players');
-      await this.savePlayerDeaths();
+    } catch (error) {
+      logtail.error(`Erro ao carregar dados dos logs de mortes dos players: ${error}`);
+      if (this.data.playerDeathLogs.length > 0) {
+        await this.savePlayerDeaths();
+      }
     }
 
     try {
@@ -60,11 +61,11 @@ export class Database {
       this.data.monsterDeathLogsIndex = new Set(
         this.data.monsterDeathLogs.map(this.createDeathLogHash)
       );
-    } catch {
-      this.data.monsterDeathLogs = [];
-      this.data.monsterDeathLogsIndex = new Set();
-      logtail.error('Erro ao carregar dados dos logs de mortes dos monstros');
-      await this.saveMonsterDeaths();
+    } catch (error) {
+      logtail.error(`Erro ao carregar dados dos logs de mortes dos monstros: ${error}`);
+      if (this.data.monsterDeathLogs.length > 0) {
+        await this.saveMonsterDeaths();
+      }
     }
   }
   
