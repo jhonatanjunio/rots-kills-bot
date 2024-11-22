@@ -263,13 +263,12 @@ export class DeathMonitor {
 
     for (const death of deaths) {
       try {
-        // Verifica se a morte aconteceu hoje
         if (!isFromToday(death.time)) {
           console.log(`Ignorando morte por monstro antiga de ${player.name} (${formatTimestamp(death.time)})`);
           continue;
         }
 
-        console.log('Salvando morte por monstro no banco:', death);
+        // Salva a morte por monstro
         await Database.addMonsterDeathLog({
           playerName: player.name,
           killed_by: death.killed_by,
@@ -277,11 +276,21 @@ export class DeathMonitor {
           timestamp: death.time,
           level: death.level
         });
-        console.log('Morte por monstro salva com sucesso');
+
+        // Verifica se o mostdamage_by é um jogador monitorado
+        const isMostDamagePlayer = await Database.isMonitoredPlayer(death.mostdamage_by);
+        if (isMostDamagePlayer) {
+          // Adiciona também como morte por player para contabilizar a assistência
+          await Database.addPlayerDeathLog({
+            playerName: player.name,
+            killed_by: death.killed_by,
+            mostdamage_by: death.mostdamage_by,
+            timestamp: death.time,
+            level: death.level
+          });
+        }
 
         const getAvatar = GameAPI.getAvatar(player.vocation);
-
-        // Cria um embed rico para a mensagem de alerta
         const deathAlert = new EmbedBuilder()
           .setColor(player.isAlly ? '#00FF00' : '#FF0000')
           .setTitle(`⚠️ UM ${player.isAlly ? 'ALIADO' : 'INIMIGO'} FOI ELIMINADO POR UM MONSTRO ⚠️`)

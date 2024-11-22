@@ -180,4 +180,10 @@ export class Database {
       }
     }
   }
+
+  static async isMonitoredPlayer(playerName: string): Promise<boolean> {
+    return this.data.players.some(
+      player => player.name.toLowerCase() === playerName.toLowerCase()
+    );
+  }
 }
