@@ -1,4 +1,4 @@
-import fs from 'fs/promises';
+import fs from 'fs-extra';
 import path from 'path';
 import { Player } from '../models/Player';
 import { DeathLogEntry } from '../models/Deathlog';
@@ -23,6 +23,10 @@ export class Database {
   private static readonly DB_PATH = path.join(process.cwd(), 'database', 'data.json');
   private static readonly PLAYER_DEATHS_PATH = path.join(process.cwd(), 'database', 'playerDeaths.json');
   private static readonly MONSTER_DB_PATH = path.join(process.cwd(), 'database', 'monsterDeaths.json');
+  private static readonly BACKUP_INTERVAL = 5 * 60 * 1000; // 5 minutos
+  private static backupInterval: NodeJS.Timeout | null = null;
+  private static isWriting = false;
+  private static writeQueue: Array<() => Promise<void>> = [];
 
   private static createDeathLogHash(deathLog: DeathLogEntry): string {
     return `${deathLog.playerName}-${deathLog.killed_by}-${deathLog.mostdamage_by}-${deathLog.timestamp}-${deathLog.level}`;
@@ -35,9 +39,6 @@ export class Database {
       this.data.players = loadedData.players;
     } catch (error) {
       logtail.error(`Erro ao carregar dados do banco de dados: ${error}`);
-      if (this.data.players.length > 0) {
-        await this.save();
-      }
     }
 
     try {
@@ -49,9 +50,6 @@ export class Database {
       );
     } catch (error) {
       logtail.error(`Erro ao carregar dados dos logs de mortes dos players: ${error}`);
-      if (this.data.playerDeathLogs.length > 0) {
-        await this.savePlayerDeaths();
-      }
     }
 
     try {
@@ -63,9 +61,6 @@ export class Database {
       );
     } catch (error) {
       logtail.error(`Erro ao carregar dados dos logs de mortes dos monstros: ${error}`);
-      if (this.data.monsterDeathLogs.length > 0) {
-        await this.saveMonsterDeaths();
-      }
     }
   }
   
@@ -92,10 +87,36 @@ export class Database {
   }
 
   private static async save() {
+    if (this.isWriting) {
+      return new Promise<void>((resolve, reject) => {
+        this.writeQueue.push(async () => {
+          try {
+            await this._save();
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+    }
+
+    this.isWriting = true;
+    try {
+      await this._save();
+    } finally {
+      this.isWriting = false;
+      if (this.writeQueue.length > 0) {
+        const nextWrite = this.writeQueue.shift();
+        if (nextWrite) nextWrite();
+      }
+    }
+  }
+
+  private static async _save() {
     const dataToSave = {
       players: this.data.players
     };
-    await fs.writeFile(this.DB_PATH, JSON.stringify(dataToSave, null, 2));
+    await this.safeWrite(this.DB_PATH, dataToSave);
   }
 
   private static async savePlayerDeaths() {
@@ -123,7 +144,6 @@ export class Database {
       await this.savePlayerDeaths();
       return true;
     } catch (error) {
-      console.error('Erro ao adicionar player death log:', error);
       logtail.error(`Erro ao adicionar player death log: ${error}`);
       return false;
     }
@@ -140,7 +160,7 @@ export class Database {
       await this.saveMonsterDeaths();
       return true;
     } catch (error) {
-      console.error('Erro ao adicionar monster death log:', error);
+      logtail.error(`Erro ao adicionar monster death log: ${error}`);
       return false;
     }
   }
@@ -168,15 +188,21 @@ export class Database {
       { path: 'database/monsterDeaths.json', content: { monsterDeathLogs: [] } }
     ];
 
+    // Garante que o diretório database existe
+    await fs.mkdir('database', { recursive: true });
+
     for (const file of files) {
+      const fullPath = path.join(process.cwd(), file.path);
+      
       try {
-        await fs.access(file.path);
+        // Verifica se o arquivo existe
+        await fs.access(fullPath);
+        // Se existe, não faz nada
+        logtail.info(`Arquivo ${file.path} já existe, mantendo conteúdo atual`);
       } catch {
-        // Se o diretório não existir, cria
-        await fs.mkdir('database', { recursive: true });
-        // Cria o arquivo com conteúdo inicial
-        await fs.writeFile(file.path, JSON.stringify(file.content, null, 2));
-        logtail.error(`Erro ao criar arquivo: ${file.path}`);
+        // Cria o arquivo APENAS se ele não existir
+        await fs.writeFile(fullPath, JSON.stringify(file.content, null, 2));
+        logtail.info(`Arquivo ${file.path} criado com sucesso`);
       }
     }
   }
@@ -185,5 +211,76 @@ export class Database {
     return this.data.players.some(
       player => player.name.toLowerCase() === playerName.toLowerCase()
     );
+  }
+
+  private static async createBackup() {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupDir = path.join(process.cwd(), 'database', 'backups');
+    
+    try {
+      await fs.mkdir(backupDir, { recursive: true });
+      
+      // Copia os arquivos principais para backup
+      for (const file of ['data.json', 'playerDeaths.json', 'monsterDeaths.json']) {
+        const sourcePath = path.join(process.cwd(), 'database', file);
+        const backupPath = path.join(backupDir, `${file}.backup`);
+        
+        if (await fs.pathExists(sourcePath)) {
+          await fs.copy(sourcePath, backupPath, { overwrite: true });
+        }
+      }
+    } catch (error) {
+      logtail.error(`Erro ao criar backup: ${error}`);
+    }
+  }
+
+  private static async safeWrite(file: string, data: any) {
+    const tempFile = `${file}.temp`;
+    const backupFile = `${file}.bak`;
+
+    try {
+      // Escreve primeiro em um arquivo temporário
+      await fs.writeJson(tempFile, data, { spaces: 2 });
+      
+      // Se existe um arquivo original, faz backup dele
+      if (await fs.pathExists(file)) {
+        await fs.copy(file, backupFile);
+      }
+      
+      // Renomeia o arquivo temporário para o nome final
+      await fs.move(tempFile, file, { overwrite: true });
+      
+      // Remove o backup se tudo deu certo
+      if (await fs.pathExists(backupFile)) {
+        await fs.remove(backupFile);
+      }
+    } catch (error) {
+      // Se algo deu errado e existe backup, restaura
+      if (await fs.pathExists(backupFile)) {
+        await fs.copy(backupFile, file);
+      }
+      throw error;
+    }
+  }
+
+  static startBackupService() {
+    if (!this.backupInterval) {
+      this.backupInterval = setInterval(() => {
+        this.createBackup();
+      }, this.BACKUP_INTERVAL);
+    }
+  }
+
+  static stopBackupService() {
+    if (this.backupInterval) {
+      clearInterval(this.backupInterval);
+      this.backupInterval = null;
+    }
+  }
+
+  static async saveAll() {
+    await this._save();
+    await this.savePlayerDeaths();
+    await this.saveMonsterDeaths();
   }
 }

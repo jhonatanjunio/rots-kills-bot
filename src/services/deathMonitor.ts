@@ -20,6 +20,10 @@ export class DeathMonitor {
 
   constructor(private client: Client) {}
 
+  public static getInstance(): DeathMonitor | null {
+    return this.instance;
+  }
+
   static initialize(client: Client): DeathMonitor {
     if (!this.instance) {
       this.instance = new DeathMonitor(client);

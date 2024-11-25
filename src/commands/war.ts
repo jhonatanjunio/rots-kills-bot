@@ -58,33 +58,33 @@ async function calculateTeamStats(
   deathLogs: any[],
   startTimestamp: number
 ): Promise<TeamStats> {
-  
-
   const playerStats: PlayerStats[] = [];
+  
+  // Filtra primeiro todas as mortes do período
+  const periodDeathLogs = deathLogs.filter(log => log.timestamp >= startTimestamp);
+  
+  // Cria um Set com os nomes dos jogadores do time atual
+  const teamPlayerNames = new Set(players.map(p => p.name.toLowerCase()));
+  
+  // Pega todas as mortes que envolvem jogadores do time (seja como vítima ou killer)
+  const relevantDeaths = periodDeathLogs.filter(log => 
+    teamPlayerNames.has(log.playerName.toLowerCase()) || 
+    teamPlayerNames.has(log.killed_by.toLowerCase()) ||
+    teamPlayerNames.has(log.mostdamage_by.toLowerCase())
+  );
 
+  // Processa as estatísticas para cada jogador do time
   for (const player of players) {
-    const deaths = deathLogs.filter(
-      log => {
-        const isMatch = log.playerName.toLowerCase() === player.name.toLowerCase() &&
-          log.timestamp >= startTimestamp;        
-        return isMatch;
-      }
+    const deaths = relevantDeaths.filter(
+      log => log.playerName.toLowerCase() === player.name.toLowerCase()
     ).length;
 
-    const kills = deathLogs.filter(
-      log => {
-        const isMatch = log.killed_by.toLowerCase() === player.name.toLowerCase() &&
-          log.timestamp >= startTimestamp;
-        return isMatch;
-      }
+    const kills = relevantDeaths.filter(
+      log => log.killed_by.toLowerCase() === player.name.toLowerCase()
     ).length;
 
-    const assists = deathLogs.filter(
-      log => {
-        const isMatch = log.mostdamage_by.toLowerCase() === player.name.toLowerCase() &&
-          log.timestamp >= startTimestamp;        
-        return isMatch;
-      }
+    const assists = relevantDeaths.filter(
+      log => log.mostdamage_by.toLowerCase() === player.name.toLowerCase()
     ).length;
 
     const kda = deaths === 0 ? kills + assists : (kills + assists) / deaths;    

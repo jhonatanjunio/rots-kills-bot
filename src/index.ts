@@ -5,7 +5,9 @@ import { commands, CommandName, registerCommands } from './commands';
 import { DeathMonitor } from './services/deathMonitor';
 import { HealthMonitor } from './services/healthMonitor';
 import { hasManagerRole } from './utils/permissions';
+import fs from 'fs-extra';
 require('dotenv').config();
+
 const client = new Client({
   intents: [
     IntentsBitField.Flags.Guilds,
@@ -34,6 +36,7 @@ client.once('ready', async () => {
   const healthMonitor = HealthMonitor.initialize(deathMonitor);
   await deathMonitor.start();
   healthMonitor.start();
+  Database.startBackupService();
 });
 
 client.on('interactionCreate', async (interaction: Interaction) => {
@@ -61,5 +64,26 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     }
   }
 });
+
+const gracefulShutdown = async (signal: string) => {
+  console.log(`\nRecebido sinal ${signal}. Iniciando desligamento gracioso...`);
+  
+  try {
+    // Para o monitor de mortes
+    const monitor = DeathMonitor.getInstance();
+    if (monitor) monitor.stop();
+    Database.stopBackupService();
+    await Database.saveAll();
+    
+    console.log('Dados salvos com sucesso. Encerrando...');
+    process.exit(0);
+  } catch (error) {
+    console.error('Erro durante o desligamento:', error);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 client.login(config.discord.token);
