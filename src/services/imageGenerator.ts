@@ -46,6 +46,10 @@ export class ImageGenerator {
         allyStats: TeamStats,
         enemyStats: TeamStats
     ): Promise<{ buffer: Buffer }> {
+        console.log('Gerando estatísticas de guerra...');
+        console.log('Aliados:', allyStats);
+        console.log('Inimigos:', enemyStats);
+        
         this.initializeFonts();
 
         // Constantes para cálculo de altura
@@ -63,14 +67,18 @@ export class ImageGenerator {
             enemyStats.players.length
         );
 
+        console.log('Número máximo de jogadores:', maxPlayers);
+
         // Calcula a altura total necessária
         const contentHeight = HEADER_HEIGHT + // Título
                             PADDING_TOP + // Padding superior
                             TEAM_HEADER_HEIGHT + // Cabeçalho dos times
-                            (ROW_HEIGHT * maxPlayers) + // Linhas de jogadores
+                            (ROW_HEIGHT * Math.max(maxPlayers, 1)) + // Linhas de jogadores (mínimo 1)
                             SECTION_PADDING + // Espaço entre a lista e o footer
                             FOOTER_HEIGHT + // Rodapé
                             PADDING_BOTTOM; // Padding inferior
+
+        console.log('Altura total do conteúdo:', contentHeight);
 
         const canvas = createCanvas(1024, contentHeight);
         const ctx = canvas.getContext('2d');
@@ -90,19 +98,19 @@ export class ImageGenerator {
         const teamWidth = 482; // (1024 - 60) / 2
 
         // Time aliado (esquerda)
-        this.drawTeamStats(ctx, 'No Fear to Kill', allyStats, this.COLORS.ALLY, 20, mainY, teamWidth);
+        await this.drawTeamStats(ctx, 'No Fear to Kill', allyStats, this.COLORS.ALLY, 20, mainY, teamWidth);
 
         // Divisor central
         ctx.fillStyle = this.COLORS.BORDER;
         ctx.fillRect(512, mainY, 2, contentHeight - HEADER_HEIGHT - PADDING_BOTTOM);
 
         // Time inimigo (direita)
-        this.drawTeamStats(ctx, 'Inimigos', enemyStats, this.COLORS.ENEMY, 522, mainY, teamWidth);
+        await this.drawTeamStats(ctx, 'Inimigos', enemyStats, this.COLORS.ENEMY, 522, mainY, teamWidth);
 
         return { buffer: canvas.toBuffer('image/png') };
     }
 
-    private static drawTeamStats(
+    private static async drawTeamStats(
         ctx: SKRSContext2D,
         title: string,
         stats: TeamStats,
@@ -111,78 +119,128 @@ export class ImageGenerator {
         y: number,
         width: number
     ) {
-        // Desenha o fundo da seção completa
-        const sectionHeight = 60 + // Título e padding
-                             40 + // Header
-                             (stats.players.length * 40) + // Linhas de jogadores
-                             60; // Footer e padding
-        
+        console.log(`Desenhando estatísticas para ${title}:`, stats);
+
+        // Background da seção
+        const titleHeight = 60;  // Altura do título + padding
+        const headerHeight = 40; // Altura do cabeçalho
+        const rowHeight = 40;    // Altura de cada linha de jogador
+        const footerHeight = 60; // Altura do footer + padding
+        const totalRows = stats.players.length || 1; // Garante pelo menos uma linha
+
+        const sectionHeight = titleHeight + 
+                             headerHeight + 
+                             (rowHeight * totalRows) + 
+                             footerHeight;
+
         ctx.fillStyle = this.COLORS.SECONDARY_BG;
         ctx.fillRect(x, y, width, sectionHeight);
 
-        // Título do time
+        // Título
         ctx.font = 'bold 20px Inter';
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
         ctx.fillText(title, x + width/2, y + 30);
 
-        // Cabeçalho da tabela
-        const headerY = y + 60;
+        // Header da tabela
+        const headerY = y + 50;
         ctx.fillStyle = this.COLORS.BACKGROUND;
         ctx.fillRect(x + 10, headerY, width - 20, 40);
 
-        // Colunas do cabeçalho
+        // Pré-carrega as medalhas
+        const medalImages = {
+            FIRST: await loadImage(this.MEDALS.FIRST),
+            SECOND: await loadImage(this.MEDALS.SECOND),
+            THIRD: await loadImage(this.MEDALS.THIRD)
+        };
+
+        // Colunas do header
         ctx.font = '14px Inter';
-        ctx.fillStyle = this.COLORS.SUBTEXT;
+        ctx.fillStyle = this.COLORS.TEXT;
         ctx.textAlign = 'left';
-        ctx.fillText('Jogador', x + 20, headerY + 25);
+        ctx.fillText('Pos', x + 20, headerY + 25);
+        ctx.fillText('Jogador', x + 70, headerY + 25);
 
         const columns = ['K', 'D', 'A', 'KDA'];
-        const columnWidth = (width - 150) / columns.length;
+        const columnWidth = (width - 200) / columns.length;
         columns.forEach((col, index) => {
             ctx.textAlign = 'center';
-            ctx.fillText(col, x + 150 + (columnWidth * index) + columnWidth/2, headerY + 25);
+            ctx.fillText(col, x + 200 + (columnWidth * index) + columnWidth/2, headerY + 25);
         });
 
         // Linhas dos jogadores
-        let rowY = headerY + 50;
-        stats.players.forEach(player => {
-            ctx.fillStyle = '#4F545C';
-            ctx.fillRect(x + 10, rowY, width - 20, 1);
+        let rowY = headerY + 40;
+        console.log('Número de jogadores:', stats.players.length);
+        
+        stats.players.forEach((player, index) => {
+            console.log(`Desenhando jogador ${index + 1}:`, player);
 
-            ctx.font = '14px Inter';
-            ctx.fillStyle = '#FFFFFF';
-            ctx.textAlign = 'left';
-            ctx.fillText(player.name, x + 20, rowY + 25);
+            // Linha de fundo
+            ctx.fillStyle = index % 2 === 0 ? this.COLORS.BACKGROUND : this.COLORS.SECONDARY_BG;
+            ctx.fillRect(x + 10, rowY, width - 20, 40);
 
-            const values = [player.kills, player.deaths, player.assists, player.kda.toFixed(2)];
-            values.forEach((value, index) => {
+            // Posição/Medalha
+            if (index < 3) {
+                // Desenha medalha para os 3 primeiros
+                const medalImage = medalImages[['FIRST', 'SECOND', 'THIRD'][index] as keyof typeof medalImages];
+                const medalSize = 20;
+                const medalY = rowY + (40 - medalSize) / 2;
+                ctx.drawImage(medalImage, x + 20, medalY, medalSize, medalSize);
+
+                // Nome do jogador com cor especial
+                ctx.font = '14px Inter';
+                ctx.fillStyle = this.COLORS[['GOLD', 'SILVER', 'BRONZE'][index] as keyof typeof this.COLORS];
+                ctx.textAlign = 'left';
+                ctx.fillText(player.name, x + 70, rowY + 25);
+            } else {
+                // Posição numérica para os demais
+                ctx.font = '14px Inter';
+                ctx.fillStyle = this.COLORS.TEXT;
                 ctx.textAlign = 'center';
-                ctx.fillText(value.toString(), x + 150 + (columnWidth * index) + columnWidth/2, rowY + 25);
+                ctx.fillText((index + 1).toString(), x + 30, rowY + 25);
+
+                // Nome do jogador
+                ctx.textAlign = 'left';
+                ctx.fillText(player.name, x + 70, rowY + 25);
+            }
+
+            // Estatísticas
+            ctx.fillStyle = this.COLORS.TEXT;
+            ctx.textAlign = 'center';
+            [player.kills, player.deaths, player.assists, player.kda.toFixed(2)].forEach((value, statIndex) => {
+                ctx.fillText(
+                    value.toString(),
+                    x + 200 + (columnWidth * statIndex) + columnWidth/2,
+                    rowY + 25
+                );
             });
 
             rowY += 40;
         });
 
-        // Rodapé com totais (agora com fundo mais escuro)
-        const footerY = headerY + 40 + (stats.players.length * 40) + 20;
+        // Rodapé com totais
+        const footerY = rowY + 10;
         ctx.fillStyle = this.COLORS.BACKGROUND;
         ctx.fillRect(x + 10, footerY, width - 20, 40);
 
         ctx.font = 'bold 14px Inter';
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = this.COLORS.TEXT;
         ctx.textAlign = 'left';
-        ctx.fillText('Total', x + 20, footerY + 25);
+        ctx.fillText('Total', x + 70, footerY + 25);
 
-        const totals = [
+        // Estatísticas totais
+        ctx.textAlign = 'center';
+        [
             stats.totalKills,
             stats.totalDeaths,
             stats.totalAssists,
             stats.averageKDA.toFixed(2)
-        ];
-        totals.forEach((value, index) => {
-            ctx.textAlign = 'center';
-            ctx.fillText(value.toString(), x + 150 + (columnWidth * index) + columnWidth/2, footerY + 25);
+        ].forEach((value, index) => {
+            ctx.fillText(
+                value.toString(),
+                x + 200 + (columnWidth * index) + columnWidth/2,
+                footerY + 25
+            );
         });
     }
 
@@ -190,14 +248,13 @@ export class ImageGenerator {
         period: string,
         playerStats: PlayerKDA[],
         page: number = 1
-    ): Promise<{ buffer: Buffer; totalPages: number }> {
+    ): Promise<{ buffer: Buffer }> {
         this.initializeFonts();
 
-        // Mantém a mesma lógica de paginação
-        const startIndex = (page - 1) * this.PLAYERS_PER_PAGE;
-        const endIndex = startIndex + this.PLAYERS_PER_PAGE;
+        const PLAYERS_PER_PAGE = 15;
+        const startIndex = (page - 1) * PLAYERS_PER_PAGE;
+        const endIndex = startIndex + PLAYERS_PER_PAGE;
         const paginatedStats = playerStats.slice(startIndex, endIndex);
-        const totalPages = Math.ceil(playerStats.length / this.PLAYERS_PER_PAGE);
 
         // Mantém as mesmas constantes de altura
         const HEADER_HEIGHT = 80;
@@ -209,8 +266,6 @@ export class ImageGenerator {
                             TABLE_HEADER_HEIGHT + 
                             (ROW_HEIGHT * paginatedStats.length) + 
                             PADDING;
-        
-
 
         const canvas = createCanvas(1024, contentHeight);
         const ctx = canvas.getContext('2d');
@@ -297,10 +352,7 @@ export class ImageGenerator {
             rowY += 40;
         });
 
-        return {
-            buffer: canvas.toBuffer('image/png'),
-            totalPages
-        };
+        return { buffer: canvas.toBuffer('image/png') };
     }
 
     private static createRankingHeader() {

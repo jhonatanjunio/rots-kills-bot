@@ -34,6 +34,7 @@ export class BrowserService {
   private static cookieManager = CookieManager.getInstance();
   private static fetchFailures = new Map<number, number>();
   private static readonly MAX_FETCH_FAILURES = 3;
+  private static readonly MAX_FETCH_RETRIES = 2;
   private static readonly API_URL = config.game.apiUrl;
 
   private static async getHeaders(): Promise<Record<string, string>> {
@@ -55,20 +56,24 @@ export class BrowserService {
     };
   }
 
-  private static async fetchWithRetry(url: string, options: any, retries = 3): Promise<any> {
-    for (let i = 0; i < retries; i++) {
+  private static async fetchWithRetry(url: string, options: any): Promise<any> {
+    for (let i = 0; i < this.MAX_FETCH_RETRIES; i++) {
       try {
         const response = await fetch(url, {
           ...options,
           agent: this.cookieManager.getAgent(),
-          timeout: 10000 // 10 segundos timeout
+          timeout: 10000
         });
+        
+        if (!response.ok) {
+          throw new Error(`Erro na requisição: ${response.status}`);
+        }
+        
         return response;
       } catch (error) {
-        console.error(`Tentativa ${i + 1} falhou:`, error);
         logtail.error(`Tentativa ${i + 1} falhou: ${error}`);
-        if (i === retries - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Espera crescente entre tentativas
+        if (i === this.MAX_FETCH_RETRIES - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
       }
     }
     throw new Error('Todas as tentativas falharam');
@@ -90,19 +95,10 @@ export class BrowserService {
       // Extrai cookies da resposta
       await this.cookieManager.extractCookiesFromResponse(response.headers);
 
-      if (!response.ok) {
-        const failures = (this.fetchFailures.get(playerId) || 0) + 1;
-        this.fetchFailures.set(playerId, failures);
-        
-        throw new Error(`Erro na requisição: ${response.status}`);
-      }
-
-      this.fetchFailures.delete(playerId);
-      
       const data: any = await response.json();
       return { error: false, data, method: 'fetch' };
     } catch (error) {
-      console.error('Erro ao buscar dados via fetch:', error);
+      logtail.error(`Erro ao buscar dados via fetch: ${error}`);
       return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'fetch' };
     }
   }
@@ -112,7 +108,6 @@ export class BrowserService {
       try {
         this.browser = await ChromeService.launchBrowser();
       } catch (error) {
-        console.error('❌ Erro ao inicializar o browser:', error);
         logtail.error(`Erro ao inicializar o browser: ${error}`);
         throw error;
       }
@@ -121,20 +116,44 @@ export class BrowserService {
   }
 
   static async getPlayerData(playerId: number): Promise<PlayerDataResponse> {
-    // Verifica se deve usar Puppeteer baseado no histórico de falhas
-    const shouldUsePuppeteer = (this.fetchFailures.get(playerId) || 0) >= this.MAX_FETCH_FAILURES;
-
-    if (!shouldUsePuppeteer) {
-      // Tenta primeiro com fetch
-      const fetchResult = await this.fetchPlayerData(playerId);
-      if (!fetchResult.error) {
-        return fetchResult;
-      }
+    const currentFailures = this.fetchFailures.get(playerId) || 0;
+    
+    // Se já atingiu o limite de falhas, vai direto para Puppeteer
+    if (currentFailures >= this.MAX_FETCH_FAILURES) {
+      logtail.info(`Usando Puppeteer para player ${playerId} após ${currentFailures} falhas`);
+      return this.getPuppeteerPlayerData(playerId);
     }
 
-    // Fallback para Puppeteer
-    console.log('Usando Puppeteer como fallback...');
-    return this.getPuppeteerPlayerData(playerId);
+    try {
+      // Tenta com fetch
+      const fetchResult = await this.fetchPlayerData(playerId);
+      
+      if (fetchResult.error) {
+        const newFailures = currentFailures + 1;
+        this.fetchFailures.set(playerId, newFailures);
+        logtail.warn(`Falha ${newFailures}/${this.MAX_FETCH_FAILURES} para player ${playerId}`);
+
+        if (newFailures >= this.MAX_FETCH_FAILURES) {
+          logtail.info(`Mudando para Puppeteer após ${newFailures} falhas para player ${playerId}`);
+          return this.getPuppeteerPlayerData(playerId);
+        }
+      } else {
+        // Limpa o contador em caso de sucesso
+        this.fetchFailures.delete(playerId);
+      }
+
+      return fetchResult;
+    } catch (error) {
+      // Garante que o contador seja incrementado mesmo em caso de erro não tratado
+      const newFailures = currentFailures + 1;
+      this.fetchFailures.set(playerId, newFailures);
+      
+      if (newFailures >= this.MAX_FETCH_FAILURES) {
+        return this.getPuppeteerPlayerData(playerId);
+      }
+      
+      return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'fetch' };
+    }
   }
 
   private static async getPuppeteerPlayerData(playerId: number): Promise<PlayerDataResponse> {
@@ -155,7 +174,6 @@ export class BrowserService {
             const data = await response.json();
             responseData = { error: false, data, method: 'browser' };
           } catch (e) {
-            console.log('Erro ao parsear resposta:', e);
             responseData = { error: true, message: 'Erro ao parsear resposta da API', method: 'browser' };
             logtail.error(`Erro ao parsear resposta: ${e}`);
           }
@@ -181,7 +199,6 @@ export class BrowserService {
 
       return responseData;
     } catch (error) {
-      console.error('Erro ao buscar dados:', error);
       logtail.error(`Erro ao buscar dados: ${error}`);
       return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'browser' };
     }

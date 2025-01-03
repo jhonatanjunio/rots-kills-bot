@@ -7,7 +7,7 @@
         "dev": "./node_modules/.bin/cross-env NODE_ENV=development ts-node src/index.ts",
         "start": "node dist/index.js",
         "watch": "tsc -w",
-        "package": "./node_modules/.bin/cross-env NODE_ENV=production npm run build && ts-node src/deploy-database.ts && pkg .",
+        "package": "./node_modules/.bin/cross-env NODE_ENV=production npx prisma generate && npm run build && ts-node src/deploy-database.ts && ts-node src/scripts/setupExecutableDatabase.ts && pkg .",
         "package-only": "./node_modules/.bin/cross-env NODE_ENV=production npm run build && pkg .",
         "deploy-commands": "ts-node src/deploy-commands.ts",
         "sync-assists": "ts-node src/scripts/syncMonsterDeathAssists.ts"
@@ -16,6 +16,7 @@
         "@logtail/node": "^0.5.2",
         "@logtail/types": "^0.5.2",
         "@napi-rs/canvas": "^0.1.60",
+        "@prisma/client": "^5.22.0",
         "@types/jest": "^29.5.14",
         "discord.js": "^14.x",
         "dotenv": "^16.4.5",
@@ -23,6 +24,8 @@
         "moment-timezone": "^0.5.46",
         "node-cron": "^3.x",
         "node-fetch": "2",
+        "node-schedule": "^2.1.1",
+        "prisma": "^5.22.0",
         "puppeteer": "^23.7.0",
         "puppeteer-core": "^23.7.0",
         "puppeteer-extra": "^3.3.6",
@@ -34,6 +37,7 @@
         "@types/fs-extra": "^11.0.4",
         "@types/node": "^18.x",
         "@types/node-fetch": "^2.6.11",
+        "@types/node-schedule": "^2.1.7",
         "cross-env": "^7.0.3",
         "jest": "^29.7.0",
         "pkg": "^5.8.1",
@@ -51,7 +55,10 @@
             "node_modules/puppeteer-extra/**/*",
             "node_modules/puppeteer-extra-plugin/**/*",
             "node_modules/puppeteer-extra-plugin-stealth/**/*",
-            "node_modules/puppeteer/**/*"
+            "node_modules/puppeteer/**/*",
+            "node_modules/.prisma/**/*",
+            "node_modules/@prisma/client/**/*",
+            "prisma/**/*"
         ],
         "targets": [
             "latest-win-x64"

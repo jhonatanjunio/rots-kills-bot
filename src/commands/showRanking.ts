@@ -61,7 +61,6 @@ export async function showRanking(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply();
     
     const period = interaction.options.getString('period');
-    const page = interaction.options.getInteger('page') || 1;
     const options = parseRankingPeriod(period);
     
     const players = (await Database.getAllMonitoredPlayers()).filter(p => p.isAlly);
@@ -90,30 +89,27 @@ export async function showRanking(interaction: ChatInputCommandInteraction) {
     playerStats.sort((a, b) => b.kda - a.kda);
 
     const periodText = getPeriodText(period);
-    const { buffer, totalPages } = await ImageGenerator.generateRankingStats(
-      periodText,
-      playerStats,
-      page
-    );
+    const totalPages = Math.ceil(playerStats.length / 15);
+    const attachments: AttachmentBuilder[] = [];
 
-    const attachment = new AttachmentBuilder(buffer, { name: 'ranking.png' });
+    // Gera uma imagem para cada página
+    for (let page = 1; page <= totalPages; page++) {
+      const { buffer } = await ImageGenerator.generateRankingStats(
+        periodText,
+        playerStats,
+        page
+      );
+      attachments.push(new AttachmentBuilder(buffer, { name: `ranking-${page}.png` }));
+    }
 
-    // Informações de paginação
-    const totalPlayers = playerStats.length;
-    const startRank = ((page - 1) * 15) + 1;
-    const endRank = Math.min(page * 15, totalPlayers);
-    
     let content = `Ranking de Guerreiros - ${periodText}`;
-    
-    // Só mostra informações de paginação se houver mais de uma página
     if (totalPages > 1) {
-      content += `\nMostrando ${startRank}º ao ${endRank}º de ${totalPlayers} jogadores`;
-      content += `\nPágina ${page}/${totalPages}`;
+      content += `\nMostrando ${playerStats.length} jogadores em ${totalPages} páginas`;
     }
 
     await interaction.editReply({
       content,
-      files: [attachment]
+      files: attachments
     });
 
   } catch (error) {

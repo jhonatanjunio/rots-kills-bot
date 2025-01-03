@@ -1,29 +1,18 @@
 import { ChatInputCommandInteraction } from 'discord.js';
-import { Database } from '../services/database';
-import { DeathMonitor } from '../services/deathMonitor';
+import { ShutdownManager } from '../services/shutdownManager';
+import { logtail } from '../utils/logtail';
 
 export async function shutdown(interaction: ChatInputCommandInteraction) {
   await interaction.reply('🔄 Iniciando processo de desligamento seguro...');
   
   try {
-    // Para o monitor usando o getter público
-    const monitor = DeathMonitor.getInstance();
-    if (monitor) {
-      monitor.stop();
-    }
-    
-    // Para o serviço de backup
-    Database.stopBackupService();
-    
-    // Salva todos os dados
-    await Database.saveAll();
-    
+    await ShutdownManager.shutdown(undefined, interaction.client);
     await interaction.editReply('✅ Bot desligado com sucesso! Você pode fechar o terminal agora.');
-    
-    // Encerra o processo
     process.exit(0);
   } catch (error) {
-    await interaction.editReply('❌ Erro ao desligar o bot: ' + error);
+    const errorMessage = `❌ Erro ao desligar o bot: ${error}`;
+    logtail.error(errorMessage);
+    await interaction.editReply(errorMessage);
     process.exit(1);
   }
 }

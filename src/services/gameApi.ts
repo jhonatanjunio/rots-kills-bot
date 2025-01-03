@@ -309,4 +309,25 @@ export class GameAPI {
                 };
         }
     }
+
+    static async searchPlayerById(playerId: number) {
+        try {
+            const response = await BrowserService.getPlayerData(playerId);
+            
+            if (response.error || !response.data) {
+                logtail.error(`Erro ao buscar jogador por ID: ${response.message}`);
+                return null;
+            }
+
+            return {
+                id: response.data.id,
+                name: response.data.name,
+                level: response.data.level,
+                vocation: response.data.vocation.id
+            };
+        } catch (error) {
+            logtail.error(`Erro ao buscar jogador por ID: ${error}`);
+            return null;
+        }
+    }
 }

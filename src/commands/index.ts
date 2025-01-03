@@ -4,10 +4,11 @@ import { showPlayerStats } from './showPlayerStats';
 import { removePlayer } from './removePlayer';
 import { showRanking } from './showRanking';
 import { war } from './war';
+import { shutdown } from './shutdown';
 
 
 // Tipo para os nomes dos comandos
-export type CommandName = 'addplayer' | 'playerstats' | 'removeplayer' | 'ranking' | 'war';
+export type CommandName = 'addplayer' | 'playerstats' | 'removeplayer' | 'ranking' | 'war' | 'shutdown';
 
 // Tipo para as funções dos comandos
 type CommandFunction = (interaction: ChatInputCommandInteraction) => Promise<void>;
@@ -73,13 +74,6 @@ export const commandsData = [
           { name: 'Últimos 30 dias', value: '30d' },
           { name: 'Histórico completo', value: 'all' }
         )
-    )
-    .addIntegerOption(option =>
-      option
-        .setName('page')
-        .setDescription('Página do ranking (15 jogadores por página)')
-        .setMinValue(1)
-        .setRequired(false)
     ),
 
   new SlashCommandBuilder()
@@ -90,7 +84,11 @@ export const commandsData = [
         .setName('period')
         .setDescription('Período (ex: 1h, 30m, 2h 30m)')
         .setRequired(true)
-    )
+    ),
+
+  new SlashCommandBuilder()
+    .setName('shutdown')
+    .setDescription('Desliga o bot')
 ] as const;
 
 // Mapeamento dos comandos para suas funções executoras
@@ -100,6 +98,7 @@ export const commands: Record<CommandName, CommandFunction> = {
   removeplayer: removePlayer,
   ranking: showRanking,
   war: war,
+  shutdown: shutdown
 };
 
 // Função para registrar os comandos no Discord

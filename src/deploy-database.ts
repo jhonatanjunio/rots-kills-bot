@@ -49,8 +49,17 @@ const assetDirectories = [
             {
                 name: 'monsterDeaths.json',
                 content: { monsterDeathLogs: [] }
+            },
+            {
+                name: 'data.db',
+                content: '' // SQLite será inicializado pelo Prisma
             }
         ]
+    },
+    {
+        src: 'prisma',
+        dest: 'executable/prisma',
+        required: ['schema.prisma']
     }
 ];
 
@@ -79,8 +88,56 @@ async function copyAssets() {
     console.log('✅ Assets copiados com sucesso!');
 }
 
+async function copyEnvironmentFiles() {
+    const envPath = path.join(process.cwd(), '.env');
+    const executableEnvPath = path.join('executable', '.env');
+
+    try {
+        if (await fs.pathExists(envPath)) {
+            await fs.copy(envPath, executableEnvPath);
+            console.log('✅ Arquivo .env copiado com sucesso!');
+        }
+    } catch (error) {
+        console.error('❌ Erro ao copiar arquivo .env:', error);
+        throw error;
+    }
+}
+
+async function copyPrismaFiles() {
+    try {
+        // Copia o schema do Prisma
+        await fs.copy(
+            path.join(process.cwd(), 'prisma'),
+            path.join('executable', 'prisma'),
+            {
+                filter: (src) => {
+                    return src.endsWith('schema.prisma');
+                }
+            }
+        );
+
+        // Copia o engine do Prisma
+        const enginePath = path.join(process.cwd(), 'node_modules', '.prisma', 'client');
+        const executableEnginePath = path.join('executable', 'node_modules', '.prisma', 'client');
+        
+        await fs.ensureDir(executableEnginePath);
+        await fs.copy(enginePath, executableEnginePath);
+
+        console.log('✅ Arquivos do Prisma copiados com sucesso!');
+    } catch (error) {
+        console.error('❌ Erro ao copiar arquivos do Prisma:', error);
+        throw error;
+    }
+}
+
 async function main() {
     await copyAssets();
+    await copyEnvironmentFiles();
+    await copyPrismaFiles();
+    
+    // Executa o prisma generate para o executável
+    const { execSync } = require('child_process');
+    execSync('npx prisma generate --schema=./executable/prisma/schema.prisma');
 }
 
 main().catch(console.error);

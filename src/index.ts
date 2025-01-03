@@ -5,7 +5,8 @@ import { commands, CommandName, registerCommands } from './commands';
 import { DeathMonitor } from './services/deathMonitor';
 import { HealthMonitor } from './services/healthMonitor';
 import { hasManagerRole } from './utils/permissions';
-import fs from 'fs-extra';
+import { ShutdownManager } from './services/shutdownManager';
+import { logtail } from './utils/logtail';
 require('dotenv').config();
 
 const client = new Client({
@@ -36,7 +37,6 @@ client.once('ready', async () => {
   const healthMonitor = HealthMonitor.initialize(deathMonitor);
   await deathMonitor.start();
   healthMonitor.start();
-  Database.startBackupService();
 });
 
 client.on('interactionCreate', async (interaction: Interaction) => {
@@ -65,25 +65,33 @@ client.on('interactionCreate', async (interaction: Interaction) => {
   }
 });
 
-const gracefulShutdown = async (signal: string) => {
-  console.log(`\nRecebido sinal ${signal}. Iniciando desligamento gracioso...`);
-  
+// Manipuladores de sinais para graceful shutdown
+const handleShutdownSignal = async (signal: string) => {
   try {
-    // Para o monitor de mortes
-    const monitor = DeathMonitor.getInstance();
-    if (monitor) monitor.stop();
-    Database.stopBackupService();
-    await Database.saveAll();
-    
-    console.log('Dados salvos com sucesso. Encerrando...');
+    await ShutdownManager.shutdown(signal, client);
     process.exit(0);
   } catch (error) {
-    console.error('Erro durante o desligamento:', error);
+    console.error('Erro fatal durante o desligamento:', error);
     process.exit(1);
   }
 };
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+// Registra os handlers para diferentes sinais
+process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'));
+process.on('SIGINT', () => handleShutdownSignal('SIGINT'));
+process.on('SIGQUIT', () => handleShutdownSignal('SIGQUIT'));
+
+// Manipulador de exceções não tratadas
+process.on('uncaughtException', async (error) => {
+  console.error('Exceção não tratada:', error);
+  logtail.error(`Exceção não tratada: ${error}`);
+  await handleShutdownSignal('UNCAUGHT_EXCEPTION');
+});
+
+process.on('unhandledRejection', async (reason) => {
+  console.error('Promise rejection não tratada:', reason);
+  logtail.error(`Promise rejection não tratada: ${reason}`);
+  await handleShutdownSignal('UNHANDLED_REJECTION');
+});
 
 client.login(config.discord.token);
