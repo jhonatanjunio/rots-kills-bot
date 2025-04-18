@@ -30,12 +30,29 @@ export class GameAPI {
                     timeout: 10000
                 });
 
+                // Trata erros 429 especificamente
+                if (response.status === 429) {
+                    logtail.warn(`Erro 429 (Too Many Requests) recebido ao tentar: ${url}`);
+                    cookieManager.registerRateLimitError();
+                    
+                    // Espera mais tempo antes de tentar novamente
+                    const backoffTime = Math.pow(2, i + 1) * 2000; // Backoff exponencial: 4s, 8s, 16s
+                    logtail.info(`Aguardando ${backoffTime/1000}s antes de nova tentativa`);
+                    await new Promise(resolve => setTimeout(resolve, backoffTime));
+                    continue;
+                }
+
+                // Verifica se a resposta foi bem-sucedida
+                if (!response.ok) {
+                    throw new Error(`Erro na requisição: ${response.status}`);
+                }
+
                 // Extrai cookies da resposta
                 await cookieManager.extractCookiesFromResponse(response.headers);
                 
                 return response;
             } catch (error) {
-                console.error(`Tentativa ${i + 1} falhou:`, error);
+                logtail.error(`Tentativa ${i + 1} falhou: ${error}`);
                 if (i === retries - 1) throw error;
                 await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
             }
@@ -45,49 +62,41 @@ export class GameAPI {
 
     static async createPlayer(playerName: string, isAlly: boolean) {
         try {
-            const url = `${config.game.apiUrl}/characters?server=Universe%20Supreme&name=${playerName}&limit=5`;
-            console.log('🔍 Buscando jogador:', url);
+            const url = `${config.game.apiUrl}/characters?server=${config.game.server}&name=${playerName}&limit=5`;
+            logtail.info(`Buscando jogador: ${playerName}`);
             
             const response = await this.fetchWithRetry(url, { headers: this.headers });
             
             if (!response.ok) {
-                console.error('❌ Erro na resposta da API:', {
-                    status: response.status,
-                    statusText: response.statusText
-                });
+                logtail.error(`Erro na resposta da API: ${response.status} ${response.statusText}`);
                 throw new Error(`Erro na API: ${response.status} ${response.statusText}`);
             }
 
             const responseText = await response.text();
-            console.log('📦 Resposta da API:', responseText);
-
+            
             let characters;
             try {
                 characters = JSON.parse(responseText);
             } catch (e) {
-                console.error('❌ Erro ao parsear JSON:', e);
                 logtail.error(`Erro ao parsear JSON: ${e}`);
                 throw new Error('Resposta inválida da API');
             }
 
             if (!Array.isArray(characters)) {
-                console.error('❌ Resposta não é um array:', characters);
-                logtail.error(`Resposta não é um array: ${characters}`);
+                logtail.error(`Resposta não é um array: ${JSON.stringify(characters).substring(0, 100)}...`);
                 throw new Error('Formato de resposta inválido');
             }
 
             const playerData = characters.find((character: any) => character.name === playerName);
             
             if (!playerData || !playerData.id) {
-                console.error('❌ Jogador não encontrado nos dados:', characters);
-                logtail.error(`Jogador não encontrado nos dados: ${characters}`);
+                logtail.error(`Jogador não encontrado nos dados`);
                 throw new Error('Jogador não encontrado');
             }
 
             const getDeaths = await BrowserService.getPlayerData(playerData.id);            
             
             if (getDeaths.error || !getDeaths.data) {
-                console.error('❌ Erro ao buscar dados do jogador:', getDeaths.message);
                 logtail.error(`Erro ao buscar dados do jogador: ${getDeaths.message}`);
                 throw new Error(getDeaths.message || 'Erro ao buscar dados do jogador');
             }
@@ -119,9 +128,9 @@ export class GameAPI {
                 }
             }
             
+            logtail.info(`Jogador criado com sucesso: ${playerName} (ID: ${data.id})`);
             return data;
         } catch (error) {
-            console.error('❌ Erro ao criar jogador:', error);
             logtail.error(`Erro ao criar jogador: ${error}`);
             throw error;
         }
@@ -159,11 +168,6 @@ export class GameAPI {
                         timestamp: death.time,
                         level: death.level
                     }));
-                
-                // if (deaths.length > 0) {
-                //     console.info('💀 Mortes por jogadores encontradas:', deaths);
-                //     await this.addDeathLogs(player.name, deaths);
-                // }
             }
 
             return { 
@@ -172,7 +176,6 @@ export class GameAPI {
                 error: false 
             };
         } catch (error) {
-            console.error(`Erro ao atualizar dados do jogador ${player.name}:`, error);
             logtail.error(`Erro ao atualizar dados do jogador ${player.name}: ${error}`);
             return {
                 error: true,
@@ -186,10 +189,9 @@ export class GameAPI {
     static async getPlayerInfo(playerName: string) {
         try {
             if (process.env.NODE_ENV === 'test') {
-                console.log('Ambiente de teste - buscando dados mock');
+                logtail.info('Ambiente de teste - buscando dados mock');
                 const { MockBrowserService } = require('../tests/mocks/mockBrowserService');
                 const response = await MockBrowserService.getPlayerData('test');
-                console.log('Dados mock obtidos:', response.data);
                 
                 return {
                     player: {
@@ -209,14 +211,13 @@ export class GameAPI {
                 const { player, deaths } = await this.updatePlayer(getPlayerData);
                 return { player, deaths };
             } else {
-                console.error(`Membro ${playerName} não encontrado no banco de dados. Você precisa adicionar o jogador primeiro com o comando /addplayer`);
+                logtail.error(`Membro ${playerName} não encontrado no banco de dados. Você precisa adicionar o jogador primeiro com o comando /addplayer`);
                 return {
                     error: true,
                     message: `Membro ${playerName} não encontrado no banco de dados. Você precisa adicionar o jogador primeiro com o comando /addplayer`
                 }
             }
         } catch (error) {
-            console.error('Erro em getPlayerInfo:', error);
             logtail.error(`Erro em getPlayerInfo: ${error}`);
             return { error: true, message: String(error), player: null, deaths: [] };
         }
@@ -230,7 +231,6 @@ export class GameAPI {
                 data: deaths
             };
         } catch (error) {
-            console.error(`Erro ao buscar mortes do jogador ${player.name}:`, error);
             logtail.error(`Erro ao buscar mortes do jogador ${player.name}: ${error}`);
             return {
                 error: true,

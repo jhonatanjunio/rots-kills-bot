@@ -34,8 +34,12 @@ export class BrowserService {
   private static cookieManager = CookieManager.getInstance();
   private static fetchFailures = new Map<number, number>();
   private static readonly MAX_FETCH_FAILURES = 3;
-  private static readonly MAX_FETCH_RETRIES = 2;
+  private static readonly MAX_FETCH_RETRIES = 3;
   private static readonly API_URL = config.game.apiUrl;
+  private static readonly SERVER = config.game.server;
+  private static readonly BROWSER_CACHE_TTL = 30 * 60 * 1000; // 30 minutos
+  private static browserLastUsed: number = 0;
+  private static readonly PUPPETEER_TIMEOUT = 120000; // 2 minutos para Puppeteer
 
   private static async getHeaders(): Promise<Record<string, string>> {
     const cfCookie = await this.cookieManager.getCookie();
@@ -62,21 +66,36 @@ export class BrowserService {
         const response = await fetch(url, {
           ...options,
           agent: this.cookieManager.getAgent(),
-          timeout: 10000
+          timeout: 15000
         });
         
+        if (response.status === 429) {
+          logtail.warn(`Erro 429 (Too Many Requests) recebido ao tentar: ${url}`);
+          this.cookieManager.registerRateLimitError();
+          
+          const backoffTime = Math.pow(2, i + 2) * 2000; // Backoff exponencial maior: 8s, 16s, 32s
+          logtail.info(`Aguardando ${backoffTime/1000}s antes de nova tentativa`);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+          continue;
+        } else if (response.status === 403) {
+          logtail.error(`Erro 403 (Forbidden) recebido ao tentar: ${url}`);
+          return null; // Retorna null para indicar que devemos mudar para o modo browser
+        }
+        
         if (!response.ok) {
-          throw new Error(`Erro na requisição: ${response.status}`);
+          logtail.error(`Erro na requisição: ${response.status} ${response.statusText}`);
+          return null;
         }
         
         return response;
       } catch (error) {
         logtail.error(`Tentativa ${i + 1} falhou: ${error}`);
-        if (i === this.MAX_FETCH_RETRIES - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        if (i === this.MAX_FETCH_RETRIES - 1) return null;
+        await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
       }
     }
-    throw new Error('Todas as tentativas falharam');
+    logtail.error('Todas as tentativas falharam');
+    return null;
   }
 
   private static async fetchPlayerData(playerId: number): Promise<PlayerDataResponse> {
@@ -85,18 +104,31 @@ export class BrowserService {
       await this.cookieManager.waitForCooldown(endpoint);
 
       const headers = await this.getHeaders();
-      const url = `${this.API_URL}${endpoint}?server=Universe%20Supreme`;
+      const url = `${this.API_URL}${endpoint}?server=${this.SERVER}`;
       
       const response = await this.fetchWithRetry(url, { 
         headers,
         agent: this.cookieManager.getAgent()
       });
 
+      // Se o fetch falhar, retornamos erro
+      if (!response) {
+        return { error: true, message: 'Erro na requisição HTTP', method: 'fetch' };
+      }
+
       // Extrai cookies da resposta
       await this.cookieManager.extractCookiesFromResponse(response.headers);
 
-      const data: any = await response.json();
-      return { error: false, data, method: 'fetch' };
+      let responseText = '';
+      try {
+        responseText = await response.text();
+        const data = JSON.parse(responseText);
+        return { error: false, data, method: 'fetch' };
+      } catch (error) {
+        logtail.error(`Erro ao processar resposta JSON: ${error}`);
+        logtail.error(`Resposta recebida: ${responseText.substring(0, 200)}...`);
+        return { error: true, message: `Erro ao parsear resposta da API: ${error}`, method: 'fetch' };
+      }
     } catch (error) {
       logtail.error(`Erro ao buscar dados via fetch: ${error}`);
       return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'fetch' };
@@ -107,15 +139,34 @@ export class BrowserService {
     if (!this.browser) {
       try {
         this.browser = await ChromeService.launchBrowser();
+        this.browserLastUsed = Date.now();
+        logtail.info('Browser inicializado com sucesso');
       } catch (error) {
         logtail.error(`Erro ao inicializar o browser: ${error}`);
-        throw error;
       }
+    } else {
+      // Verifica se o browser está ocioso por muito tempo e precisa ser reiniciado
+      const now = Date.now();
+      if (now - this.browserLastUsed > this.BROWSER_CACHE_TTL) {
+        try {
+          await this.browser.close();
+          this.browser = await ChromeService.launchBrowser();
+          logtail.info('Browser reiniciado após período de inatividade');
+        } catch (error) {
+          logtail.error(`Erro ao reiniciar o browser: ${error}`);
+        }
+      }
+      this.browserLastUsed = now;
     }
     return this.browser;
   }
 
   static async getPlayerData(playerId: number): Promise<PlayerDataResponse> {
+    // Vamos pular completamente o método fetch e usar apenas o Puppeteer
+    return this.getPuppeteerPlayerData(playerId);
+
+    /* 
+    // Desativado o método de fetch para evitar problemas de rate limiting
     const currentFailures = this.fetchFailures.get(playerId) || 0;
     
     // Se já atingiu o limite de falhas, vai direto para Puppeteer
@@ -154,44 +205,91 @@ export class BrowserService {
       
       return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'fetch' };
     }
+    */
   }
 
-  private static async getPuppeteerPlayerData(playerId: number): Promise<PlayerDataResponse> {
+  public static async getPuppeteerPlayerData(playerId: number): Promise<PlayerDataResponse> {
     try {
       const browser = await this.initialize();
-      const page = await browser.newPage();
+      if (!browser) {
+        return { error: true, message: 'Falha ao inicializar o navegador', method: 'browser' };
+      }
+      
+      let page;
+      try {
+        page = await browser.newPage();
+      } catch (error) {
+        logtail.error(`Erro ao criar nova página: ${error}`);
+        // Tenta reiniciar o browser
+        await this.browser.close();
+        this.browser = await ChromeService.launchBrowser();
+        page = await this.browser.newPage();
+      }
+
+      await page.setDefaultNavigationTimeout(this.PUPPETEER_TIMEOUT);
+      await page.setDefaultTimeout(this.PUPPETEER_TIMEOUT);
+      
+      // Configurações adicionais para o navegador parecer mais humano
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
+      });
       
       await page.setRequestInterception(true);
       let responseData: PlayerDataResponse | null = null;
 
       page.on('request', (request: any) => {
-        request.continue();
+        // Bloquear recursos desnecessários para melhorar performance
+        const resourceType = request.resourceType();
+        if (resourceType === 'image' || resourceType === 'font' || resourceType === 'media') {
+          request.abort();
+        } else {
+          request.continue();
+        }
       });
 
       page.on('response', async (response: any) => {
         if (response.url().includes('/profile/')) {
           try {
-            const data = await response.json();
+            const responseText = await response.text();
+            if (responseText.includes('<!DOCTYPE html>') || responseText.includes('<html>')) {
+              // É uma resposta HTML, provavelmente um erro ou página de bloqueio
+              logtail.warn(`Resposta HTML recebida - possível bloqueio de Cloudflare`);
+              responseData = { error: true, message: 'Erro: Resposta HTML recebida em vez de JSON', method: 'browser' };
+              return;
+            }
+            
+            const data = JSON.parse(responseText);
             responseData = { error: false, data, method: 'browser' };
           } catch (e) {
-            responseData = { error: true, message: 'Erro ao parsear resposta da API', method: 'browser' };
             logtail.error(`Erro ao parsear resposta: ${e}`);
+            responseData = { error: true, message: 'Erro ao parsear resposta da API', method: 'browser' };
           }
         }
       });
 
-      await page.goto(`${this.API_URL}/profile/${playerId}?server=Universe%20Supreme`, {
-        waitUntil: 'networkidle0',
-        timeout: 30000
+      // Aumenta o timeout para dar mais tempo para carregar
+      logtail.info(`Navegando para perfil do jogador ${playerId}`);
+      await page.goto(`${this.API_URL}/profile/${playerId}?server=${this.SERVER}`, {
+        waitUntil: 'networkidle2',
+        timeout: this.PUPPETEER_TIMEOUT
       });
 
       let attempts = 0;
-      while (!responseData && attempts < 10) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      const maxAttempts = 30; // Aumenta o número de tentativas
+      const attemptDelay = 1000; // ms entre checagens 
+      
+      while (!responseData && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, attemptDelay));
         attempts++;
+        
+        if (attempts % 10 === 0) {
+          logtail.info(`Aguardando resposta da API... Tentativa ${attempts}/${maxAttempts}`);
+        }
       }
 
-      await page.close();
+      this.browserLastUsed = Date.now();
+      await page.close().catch((error: Error) => logtail.error(`Erro ao fechar página: ${error}`));
 
       if (!responseData) {
         return { error: true, message: 'Timeout ao aguardar dados do jogador', method: 'browser' };
@@ -199,7 +297,19 @@ export class BrowserService {
 
       return responseData;
     } catch (error) {
-      logtail.error(`Erro ao buscar dados: ${error}`);
+      logtail.error(`Erro ao buscar dados via browser: ${error}`);
+      
+      // Tenta reiniciar o browser em caso de erro
+      try {
+        if (this.browser) {
+          await this.browser.close().catch(() => {});
+        }
+        this.browser = await ChromeService.launchBrowser();
+        logtail.info('Browser reiniciado após erro');
+      } catch (e) {
+        logtail.error(`Erro ao reiniciar browser: ${e}`);
+      }
+      
       return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'browser' };
     }
   }

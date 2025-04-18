@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import path from 'path';
+import { logtail } from '../utils/logtail';
 
 export class ChromeService {
   static getChromePath(): string {
@@ -11,7 +12,7 @@ export class ChromeService {
 
   static async launchBrowser() {
     const chromePath = this.getChromePath();
-    console.log('📂 Iniciando Chrome em:', chromePath);
+    logtail.info(`Iniciando Chrome em: ${chromePath}`);
 
     puppeteer.use(StealthPlugin());
     return await puppeteer.launch({

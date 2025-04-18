@@ -1,6 +1,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import puppeteer from 'puppeteer';
+import { logtail } from './utils/logtail';
 
 async function copyChromium() {
     try {
@@ -8,8 +9,8 @@ async function copyChromium() {
         const executablePath = puppeteer.executablePath();
         const chromiumPath = path.join('executable', '.local-chromium');
         
-        console.log('📂 Copiando Chromium de:', executablePath);
-        console.log('📂 Para:', chromiumPath);
+        logtail.info(`Copiando Chromium de: ${executablePath}`);
+        logtail.info(`Para: ${chromiumPath}`);
         
         // Cria diretório para o Chromium
         await fs.ensureDir(chromiumPath);
@@ -21,9 +22,9 @@ async function copyChromium() {
             { overwrite: true }
         );
 
-        console.log('✅ Chromium copiado com sucesso!');
+        logtail.info('Chromium copiado com sucesso!');
     } catch (error) {
-        console.error('❌ Erro ao copiar Chromium:', error);
+        logtail.error(`Erro ao copiar Chromium: ${error}`);
         throw error;
     }
 }
@@ -51,8 +52,26 @@ const assetDirectories = [
                 content: { monsterDeathLogs: [] }
             },
             {
-                name: 'data.db',
-                content: '' // SQLite será inicializado pelo Prisma
+                name: 'queue1.json',
+                content: { players: [] }
+            },
+            {
+                name: 'queue2.json',
+                content: { players: [] }
+            },
+            {
+                name: 'queue3.json',
+                content: { players: [] }
+            },
+            {
+                name: 'robots.json',
+                content: { 
+                    robots: [
+                        { id: 1, status: 'stopped', queueFile: 'queue1.json', lastRunTime: null },
+                        { id: 2, status: 'stopped', queueFile: 'queue2.json', lastRunTime: null },
+                        { id: 3, status: 'stopped', queueFile: 'queue3.json', lastRunTime: null }
+                    ]
+                }
             }
         ]
     },
@@ -85,7 +104,7 @@ async function copyAssets() {
 
     await copyChromium();
 
-    console.log('✅ Assets copiados com sucesso!');
+    logtail.info('Assets copiados com sucesso!');
 }
 
 async function copyEnvironmentFiles() {
@@ -95,10 +114,10 @@ async function copyEnvironmentFiles() {
     try {
         if (await fs.pathExists(envPath)) {
             await fs.copy(envPath, executableEnvPath);
-            console.log('✅ Arquivo .env copiado com sucesso!');
+            logtail.info('Arquivo .env copiado com sucesso!');
         }
     } catch (error) {
-        console.error('❌ Erro ao copiar arquivo .env:', error);
+        logtail.error(`Erro ao copiar arquivo .env: ${error}`);
         throw error;
     }
 }
@@ -123,21 +142,37 @@ async function copyPrismaFiles() {
         await fs.ensureDir(executableEnginePath);
         await fs.copy(enginePath, executableEnginePath);
 
-        console.log('✅ Arquivos do Prisma copiados com sucesso!');
+        logtail.info('Arquivos do Prisma copiados com sucesso!');
     } catch (error) {
-        console.error('❌ Erro ao copiar arquivos do Prisma:', error);
+        logtail.error(`Erro ao copiar arquivos do Prisma: ${error}`);
         throw error;
     }
 }
 
 async function main() {
-    await copyAssets();
-    await copyEnvironmentFiles();
-    await copyPrismaFiles();
-    
-    // Executa o prisma generate para o executável
-    const { execSync } = require('child_process');
-    execSync('npx prisma generate --schema=./executable/prisma/schema.prisma');
+    try {
+        // 1. Copia assets e arquivos de ambiente primeiro
+        await copyAssets();
+        await copyEnvironmentFiles();
+        await copyPrismaFiles();
+        
+        // 2. Executa o prisma generate para o executável
+        logtail.info('Gerando cliente Prisma...');
+        const { execSync } = require('child_process');
+        execSync('npx prisma generate --schema=./executable/prisma/schema.prisma');
+
+        // 3. Inicializa o banco de dados usando o setupExecutableDatabase
+        logtail.info('Inicializando banco de dados...');
+        const { setupExecutableDatabase } = require('./scripts/setupExecutableDatabase');
+        await setupExecutableDatabase();
+
+        logtail.info('Deploy concluído com sucesso!');
+    } catch (error) {
+        logtail.error(`Erro durante o deploy: ${error}`);
+        throw error;
+    }
 }
 
-main().catch(console.error);
+main().catch((error) => {
+    logtail.error(`Erro fatal durante o deploy: ${error}`);
+});

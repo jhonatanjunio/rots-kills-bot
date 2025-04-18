@@ -28,14 +28,14 @@ class PrismaService {
     try {
       // Garante que o diretório database existe
       if (!fs.existsSync(PrismaService.DB_DIR)) {
+        console.log('📁 Criando diretório do banco de dados...');
         fs.mkdirSync(PrismaService.DB_DIR, { recursive: true });
-        logtail.info(`Diretório do banco de dados criado: ${PrismaService.DB_DIR}`);
       }
 
-      // Garante que o arquivo do banco existe
-      if (!fs.existsSync(PrismaService.DB_FILE)) {
-        fs.writeFileSync(PrismaService.DB_FILE, '');
-        logtail.info(`Arquivo do banco de dados criado: ${PrismaService.DB_FILE}`);
+      // Se o arquivo não existe ou está corrompido, recria
+      if (!fs.existsSync(PrismaService.DB_FILE) || this.isDatabaseCorrupted()) {
+        console.log('🔄 Inicializando novo banco de dados...');
+        this.initializeDatabase();
       }
 
       // Verifica permissões
@@ -43,6 +43,46 @@ class PrismaService {
     } catch (error) {
       logtail.error(`Erro ao preparar banco de dados: ${error}`);
       throw new Error(`Falha ao configurar banco de dados: ${error}`);
+    }
+  }
+
+  private isDatabaseCorrupted(): boolean {
+    try {
+      const header = fs.readFileSync(PrismaService.DB_FILE, { encoding: 'utf8', flag: 'r' });
+      return !header.includes('SQLite format 3');
+    } catch {
+      return true;
+    }
+  }
+
+  private initializeDatabase(): void {
+    try {
+      // Remove o arquivo se existir
+      if (fs.existsSync(PrismaService.DB_FILE)) {
+        fs.unlinkSync(PrismaService.DB_FILE);
+      }
+
+      // Cria um novo arquivo vazio
+      fs.writeFileSync(PrismaService.DB_FILE, '');
+
+      // Inicializa o banco com uma query simples
+      const tempPrisma = new PrismaClient({
+        datasources: {
+          db: {
+            url: `file:${PrismaService.DB_FILE}`
+          }
+        }
+      });
+
+      tempPrisma.$executeRaw`PRAGMA journal_mode = WAL;`.then(() => {
+        tempPrisma.$disconnect();
+      }).catch(error => {
+        console.error('Erro ao inicializar banco:', error);
+        throw error;
+      });
+    } catch (error) {
+      console.error('Erro ao criar novo banco:', error);
+      throw error;
     }
   }
 

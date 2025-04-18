@@ -4,6 +4,7 @@ import { TeamStats } from '../models/TeamStats';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PlayerKDA } from '../models/Ranking';
+import config from '../config';
 
 export class ImageGenerator {
     private static readonly PLAYERS_PER_PAGE = 10;
@@ -98,7 +99,7 @@ export class ImageGenerator {
         const teamWidth = 482; // (1024 - 60) / 2
 
         // Time aliado (esquerda)
-        await this.drawTeamStats(ctx, 'No Fear to Kill', allyStats, this.COLORS.ALLY, 20, mainY, teamWidth);
+        await this.drawTeamStats(ctx, config.guild.name, allyStats, this.COLORS.ALLY, 20, mainY, teamWidth);
 
         // Divisor central
         ctx.fillStyle = this.COLORS.BORDER;

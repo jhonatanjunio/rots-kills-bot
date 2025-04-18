@@ -5,6 +5,8 @@
     "scripts": {
         "build": "tsc",
         "dev": "./node_modules/.bin/cross-env NODE_ENV=development ts-node src/index.ts",
+        "prod": "./node_modules/.bin/cross-env NODE_ENV=production ts-node src/index.ts",
+        "verify-db": "ts-node src/scripts/verifyDatabase.ts",
         "start": "node dist/index.js",
         "watch": "tsc -w",
         "package": "./node_modules/.bin/cross-env NODE_ENV=production npx prisma generate && npm run build && ts-node src/deploy-database.ts && ts-node src/scripts/setupExecutableDatabase.ts && pkg .",
@@ -31,6 +33,7 @@
         "puppeteer-extra": "^3.3.6",
         "puppeteer-extra-plugin-stealth": "^2.11.2",
         "puppeteer-real-browser": "^1.3.17",
+        "sqlite3": "^5.1.7",
         "ts-jest": "^29.2.5"
     },
     "devDependencies": {
