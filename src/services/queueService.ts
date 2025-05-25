@@ -339,6 +339,7 @@ export class QueueService {
         const allDone = queue.every(p => p.status === 'done' || p.status === 'erroed');
         
         if (allDone) {
+          logtail.info(`Robô ${robotId}: Todos os jogadores processados. Reiniciando fila...`);
           // Reinicia a fila
           const resetQueue: QueuePlayer[] = queue.map(p => ({
             ...p,
@@ -348,11 +349,14 @@ export class QueueService {
           }));
           
           await this.saveQueue(robot.queueFile, resetQueue);
+          logtail.info(`Robô ${robotId}: Fila reiniciada com ${resetQueue.length} jogadores`);
         }
         
         // Não há processamento a fazer agora
         return;
       }
+      
+      logtail.info(`Robô ${robotId}: Iniciando processamento do jogador ${pendingPlayer.name} (ID: ${pendingPlayer.id})`);
       
       // Aguarda o cooldown global antes de processar
       await this.waitForGlobalCooldown();
@@ -368,10 +372,9 @@ export class QueueService {
       await this.saveQueue(robot.queueFile, updatedQueue);
       
       // Processa o jogador
-      logtail.info(`Robô ${robotId} processando jogador ${pendingPlayer.name}`);
+      logtail.info(`Robô ${robotId}: Buscando dados do jogador ${pendingPlayer.name}`);
       
       // Busca informações do jogador APENAS usando o método do navegador
-      // Isso deve evitar os problemas de 429 e 403
       const browser = this.browserInstances.get(robotId);
       if (!browser) {
         logtail.error(`Browser não encontrado para robô ${robotId}`);
@@ -382,11 +385,8 @@ export class QueueService {
       const response = await BrowserService.getPuppeteerPlayerData(pendingPlayer.id);
       
       if (response.error || !response.data) {
-        // Se ocorreu erro, aumenta o cooldown global
+        logtail.warn(`Robô ${robotId}: Erro ao buscar dados do jogador ${pendingPlayer.name}: ${response.message}`);
         this.increaseGlobalCooldown();
-        
-        // Registra o erro e atualiza contagem
-        logtail.warn(`Erro ao buscar dados do jogador ${pendingPlayer.name}: ${response.message}`);
         
         const errorQueue: QueuePlayer[] = queue.map(p => {
           if (p.id === pendingPlayer.id) {
@@ -401,18 +401,15 @@ export class QueueService {
           return p;
         });
         
-        // Coloca o jogador no final da fila (se não excedeu o limite de erros)
         const updatedPlayer = errorQueue.find(p => p.id === pendingPlayer.id);
-        if (updatedPlayer && updatedPlayer.status === 'pending') {
-          const playerIndex = errorQueue.findIndex(p => p.id === pendingPlayer.id);
-          if (playerIndex >= 0) {
-            const player = errorQueue.splice(playerIndex, 1)[0];
-            errorQueue.push(player);
-          }
+        if (updatedPlayer) {
+          logtail.info(`Robô ${robotId}: Jogador ${pendingPlayer.name} - Erro ${updatedPlayer.errorCount}/${QueueService.MAX_ERROR_COUNT}`);
         }
         
         await this.saveQueue(robot.queueFile, errorQueue);
       } else {
+        logtail.info(`Robô ${robotId}: Dados do jogador ${pendingPlayer.name} obtidos com sucesso`);
+        
         // Sucesso: atualiza o banco de dados e marca como concluído
         const playerData = response.data;
         
@@ -421,15 +418,16 @@ export class QueueService {
           name: playerData.name,
           level: playerData.level,
           vocation: playerData.vocation.id,
-          // Mantém o status de aliado do registro atual
           isAlly: (await Database.getPlayer(playerData.name))?.isAlly || false
         };
         
         // Atualiza o jogador no banco de dados
         await Database.updatePlayer(player);
+        logtail.info(`Robô ${robotId}: Dados do jogador ${player.name} atualizados no banco`);
         
         // Processa mortes se houver
         if (playerData.deaths && playerData.deaths.deaths?.length > 0) {
+          logtail.info(`Robô ${robotId}: Processando ${playerData.deaths.deaths.length} mortes do jogador ${player.name}`);
           await this.processDeaths(player, playerData.deaths.deaths);
         }
         
@@ -447,7 +445,7 @@ export class QueueService {
         });
         
         await this.saveQueue(robot.queueFile, successQueue);
-        logtail.info(`Jogador ${pendingPlayer.name} processado com sucesso`);
+        logtail.info(`Robô ${robotId}: Processamento do jogador ${pendingPlayer.name} concluído com sucesso`);
         
         // Reduz gradualmente o cooldown quando há sucesso
         this.globalCooldown = Math.max(QueueService.GLOBAL_COOLDOWN, this.globalCooldown * 0.9);
@@ -457,9 +455,8 @@ export class QueueService {
       robot.lastRunTime = Date.now();
       await this.saveRobots();
       
-      // Aguarda um tempo aleatório antes de processar o próximo jogador
-      // Usamos intervalos muito maiores para evitar overload da API
       const delay = randomInt(QueueService.MIN_DELAY, QueueService.MAX_DELAY);
+      logtail.info(`Robô ${robotId}: Aguardando ${Math.round(delay/1000)}s antes do próximo processamento`);
       
       await new Promise(resolve => setTimeout(resolve, delay));
       

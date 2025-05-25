@@ -4,7 +4,7 @@ import { Player } from '../models/Player';
 import { DeathLogEntry } from '../models/Deathlog';
 import { logtail } from '../utils/logtail';
 import { scheduleJob } from 'node-schedule';
-import { prismaService } from './prisma';
+import { getPrismaService } from './prisma';
 
 interface DatabaseSchema {
   players: Player[];
@@ -49,6 +49,7 @@ export class Database {
         logtail.info('Iniciando restauração dos dados do Prisma...');
         
         // Busca dados do Prisma
+        const prismaService = await getPrismaService();
         const prisma = prismaService.getClient();
         const prismaPlayers = await prisma.player.findMany();
         
@@ -92,12 +93,48 @@ export class Database {
   static async initialize() {
     await this.ensureDatabaseFiles();
     await this.load();
+    await this.syncWithPrisma();
     await this.loadFromPrisma();
     this.setupBackupSchedule();
   }
 
+  private static async syncWithPrisma() {
+    try {
+      console.log('🔄 Sincronizando dados com Prisma...');
+      
+      // Se temos dados no data.json mas o Prisma está vazio, populamos o Prisma
+      const prismaService = await getPrismaService();
+      const prisma = prismaService.getClient();
+      const prismaPlayers = await prisma.player.count();
+      
+      if (prismaPlayers === 0 && this.data.players.length > 0) {
+        console.log(`📥 Importando ${this.data.players.length} jogadores para o Prisma...`);
+        
+        await prisma.player.createMany({
+          data: this.data.players.map(player => ({
+            id: player.id,
+            name: player.name,
+            level: player.level,
+            vocation: player.vocation,
+            isAlly: player.isAlly
+          }))
+        });
+        
+        console.log('✅ Dados sincronizados com sucesso!');
+      } else if (prismaPlayers > 0 && this.data.players.length === 0) {
+        // Se o Prisma tem dados mas o data.json está vazio, restauramos do Prisma
+        console.log(`📤 Restaurando ${prismaPlayers} jogadores do Prisma...`);
+        await this.restoreFromBackup();
+      }
+    } catch (error) {
+      console.error('❌ Erro ao sincronizar com Prisma:', error);
+      logtail.error(`Erro ao sincronizar com Prisma: ${error}`);
+    }
+  }
+
   private static async loadFromPrisma() {
     try {
+      const prismaService = await getPrismaService();
       const prismaPlayers = await prismaService.getClient().player.findMany();
       this.data.players = prismaPlayers.map(player => ({
         id: player.id,
@@ -112,6 +149,7 @@ export class Database {
   }
 
   private static async saveBackupToPrisma() {
+    const prismaService = await getPrismaService();
     const prisma = prismaService.getClient();
     try {
       await prisma.$transaction(async (tx) => {
@@ -143,6 +181,7 @@ export class Database {
 
   static async createBackup(): Promise<void> {
     try {
+      const prismaService = await getPrismaService();
       const prisma = prismaService.getClient();
       
       // Cria um timestamp para logging

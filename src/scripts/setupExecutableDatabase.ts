@@ -5,6 +5,7 @@ import { Database as SQLite3 } from 'sqlite3';
 
 async function setupExecutableDatabase() {
     const dbPath = path.join(process.cwd(), 'database', 'data.db');
+    const dataJsonPath = path.join(process.cwd(), 'database', 'data.json');
     
     try {
         // Remove o arquivo se existir
@@ -50,6 +51,33 @@ async function setupExecutableDatabase() {
                     isAlly BOOLEAN NOT NULL
                 )
             `;
+
+            // Importa dados do data.json se existir
+            if (await fs.pathExists(dataJsonPath)) {
+                console.log('📥 Importando dados do data.json...');
+                const jsonData = await fs.readJSON(dataJsonPath);
+                
+                if (jsonData.players && jsonData.players.length > 0) {
+                    console.log(`Encontrados ${jsonData.players.length} jogadores para importar`);
+                    
+                    // Importa os jogadores
+                    await prisma.player.createMany({
+                        data: jsonData.players.map((player: any) => ({
+                            id: player.id,
+                            name: player.name,
+                            level: player.level,
+                            vocation: player.vocation,
+                            isAlly: player.isAlly
+                        }))
+                    });
+                    
+                    console.log('✅ Dados importados com sucesso!');
+                } else {
+                    console.log('⚠️ Arquivo data.json está vazio');
+                }
+            } else {
+                console.log('⚠️ Arquivo data.json não encontrado');
+            }
 
             console.log('✅ Banco de dados configurado com sucesso!');
         } finally {

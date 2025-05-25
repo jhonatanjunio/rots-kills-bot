@@ -38,6 +38,7 @@ const assetDirectories = [
     {
         src: 'database',
         dest: 'executable/database',
+        preserveFiles: ['data.json', 'playerDeaths.json', 'monsterDeaths.json'], // Arquivos a serem preservados
         defaultFiles: [
             {
                 name: 'data.json',
@@ -87,14 +88,31 @@ async function copyAssets() {
         // Garante que o diretório de destino existe
         await fs.ensureDir(dir.dest);
 
+        if (dir.preserveFiles) {
+            // Copia arquivos que precisam ser preservados
+            for (const file of dir.preserveFiles) {
+                const srcPath = path.join(dir.src, file);
+                const destPath = path.join(dir.dest, file);
+
+                if (await fs.pathExists(srcPath)) {
+                    logtail.info(`Preservando arquivo ${file}...`);
+                    await fs.copy(srcPath, destPath, { overwrite: true });
+                }
+            }
+        }
+
         if (dir.defaultFiles) {
-            // Se tem arquivos padrão, cria eles
+            // Cria apenas os arquivos padrão que não existem
             for (const file of dir.defaultFiles) {
                 const filePath = path.join(dir.dest, file.name);
-                await fs.writeJSON(filePath, file.content, { spaces: 2 });
+                
+                // Se o arquivo não deve ser preservado ou não existe, cria ele
+                if (!dir.preserveFiles?.includes(file.name) || !await fs.pathExists(filePath)) {
+                    await fs.writeJSON(filePath, file.content, { spaces: 2 });
+                }
             }
         } else {
-            // Se não, copia o diretório inteiro
+            // Se não tem arquivos específicos, copia o diretório inteiro
             await fs.copy(dir.src, dir.dest, {
                 overwrite: true,
                 errorOnExist: false
@@ -103,7 +121,6 @@ async function copyAssets() {
     }
 
     await copyChromium();
-
     logtail.info('Assets copiados com sucesso!');
 }
 
@@ -149,6 +166,37 @@ async function copyPrismaFiles() {
     }
 }
 
+async function setupDatabase() {
+    try {
+        const srcDataPath = path.join(process.cwd(), 'database', 'data.json');
+        const execDataPath = path.join('executable', 'database', 'data.json');
+        
+        // Verifica se temos dados para migrar
+        if (await fs.pathExists(srcDataPath)) {
+            const sourceData = await fs.readJSON(srcDataPath);
+            
+            if (sourceData.players && sourceData.players.length > 0) {
+                logtail.info(`Encontrados ${sourceData.players.length} jogadores para migrar...`);
+                
+                // Garante que o diretório de destino existe
+                await fs.ensureDir(path.join('executable', 'database'));
+                
+                // Copia o arquivo data.json
+                await fs.copy(srcDataPath, execDataPath, { overwrite: true });
+                
+                logtail.info('Dados migrados com sucesso!');
+            } else {
+                logtail.warn('Arquivo data.json existe mas está vazio');
+            }
+        } else {
+            logtail.warn('Arquivo data.json não encontrado na origem');
+        }
+    } catch (error) {
+        logtail.error(`Erro ao configurar banco de dados: ${error}`);
+        throw error;
+    }
+}
+
 async function main() {
     try {
         // 1. Copia assets e arquivos de ambiente primeiro
@@ -156,12 +204,15 @@ async function main() {
         await copyEnvironmentFiles();
         await copyPrismaFiles();
         
-        // 2. Executa o prisma generate para o executável
+        // 2. Configura o banco de dados e migra os dados
+        await setupDatabase();
+        
+        // 3. Executa o prisma generate para o executável
         logtail.info('Gerando cliente Prisma...');
         const { execSync } = require('child_process');
         execSync('npx prisma generate --schema=./executable/prisma/schema.prisma');
 
-        // 3. Inicializa o banco de dados usando o setupExecutableDatabase
+        // 4. Inicializa o banco de dados usando o setupExecutableDatabase
         logtail.info('Inicializando banco de dados...');
         const { setupExecutableDatabase } = require('./scripts/setupExecutableDatabase');
         await setupExecutableDatabase();

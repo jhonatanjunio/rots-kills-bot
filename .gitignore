@@ -14,3 +14,4 @@ _config.json
 yarn.lock
 yarn-error.log
 package-lock.json
+/bkp_envs

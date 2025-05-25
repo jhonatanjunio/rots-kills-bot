@@ -1,38 +1,54 @@
 # 🎮 ROTS War Bot
 
 ## 📋 Sobre
-Bot do Discord desenvolvido para monitorar e gerenciar estatísticas de jogadores do Saiyans Return (ROTS). O bot rastreia mortes, mantém rankings e fornece informações detalhadas sobre o desempenho dos jogadores.
+Bot do Discord desenvolvido para monitorar e gerenciar estatísticas de jogadores do Saiyans Return (ROTS). O bot rastreia mortes (PvP e PvE), mantém rankings, envia alertas e fornece informações detalhadas sobre o desempenho dos jogadores aliados e inimigos.
 
-## ⚡ Principais Funcionalidades
+## ⚡ Funcionalidades Atuais
 
 ### 1. Monitoramento de Jogadores
-- Rastreamento automático de mortes
+- Rastreamento automático de mortes (PvP e PvE)
 - Sistema de aliados e inimigos
-- Atualização em tempo real
+- Atualização em tempo real das informações dos jogadores
+- Detecção e registro de troca de classe e mudança de nick
 
-### 2. Comandos Discord
-- `/addplayer` - Adiciona um jogador ao monitoramento
-- `/removeplayer` - Remove um jogador do monitoramento
-- `/playerstats` - Exibe estatísticas detalhadas do jogador
-- `/ranking` - Mostra ranking de KDA (Kills/Deaths/Assists)
+### 2. Comandos Discord Disponíveis
+- `/addplayer` — Adiciona um jogador ao monitoramento (aliado ou inimigo)
+- `/removeplayer` — Remove um jogador do monitoramento
+- `/playerstats` — Exibe estatísticas detalhadas do jogador (nível, mortes, assassino mais frequente, última morte, etc)
+- `/ranking` — Mostra ranking de KDA (Kills/Deaths/Assists) dos aliados, com opção de período (24h, 7d, 30d, total)
+- `/war` — Mostra estatísticas de guerra entre aliados e inimigos em um período customizável (ex: 1d, 2h 30m)
+- `/shutdown` — Desliga o bot de forma segura
 
 ### 3. Sistema de Estatísticas
-- Contagem de mortes
-- Rastreamento de KDA
-- Histórico de combates
-- Análise de períodos (24h, 7d, 30d, total)
+- Contagem de mortes por jogador
+- Rastreamento de KDA (Kills, Deaths, Assists)
+- Histórico de combates detalhado
+- Análise de períodos customizáveis (24h, 7d, 30d, total)
+- Ranking visual (imagem) e em tabela ASCII
 
-### 4. Notificações
-- Alertas de morte em tempo real
-- Detalhes do combate
-- Informações do assassino
+### 4. Notificações e Alertas
+- Alertas de morte em tempo real (PvP e PvE) via Discord Embed
+- Detalhes do combate (quem matou, maior dano, horário, etc)
+- Notificações de troca de classe e mudança de nick
+- Logs separados para mortes por monstros
+
+### 5. Recursos Técnicos e Arquiteturais
+- Cache inteligente para evitar requisições duplicadas à API
+- Sistema de filas e robôs para processamento paralelo dos jogadores
+- Sistema de backup e restauração automática do banco de dados
+- Logging detalhado e tratamento robusto de erros
+- Proteção contra duplicação de dados e rate limiting
+
+### 6. Segurança
+- Rate limiting para evitar banimento por excesso de requisições
+- Validação de entradas e gerenciamento seguro de tokens
 
 ## 🔧 Tecnologias Utilizadas
 
-- TypeScript
+- TypeScript (strict mode)
 - Discord.js
 - Puppeteer
-- Jest (Testes)
+- Jest (testes)
 - Node.js
 - Moment.js
 
@@ -122,26 +138,22 @@ Cada um destes destaques técnicos foi implementado pensando em performance, man
 
 ## 📊 Funcionalidades de Monitoramento
 
-- Rastreamento de mortes em tempo real
-- Análise de estatísticas
-- Sistema de ranking
-- Histórico detalhado de combates
+- Rastreamento de mortes em tempo real (PvP e PvE)
+- Análise de estatísticas e histórico de combates
+- Sistema de ranking e guerra entre times
+- Logs detalhados de mortes por monstros e trocas de classe
 
 ## 🛠️ Recursos Técnicos
 
-- Typescript strict mode
-- Arquitetura modular
-- Sistema de logging
-- Tratamento de erros robusto
+- Arquitetura modular e escalável
+- Sistema de logging e tratamento de erros
 - Testes automatizados
 
+---
 
-Este bot é uma ferramenta completa para gerenciamento de guerra no ROTS, oferecendo monitoramento em tempo real, estatísticas detalhadas e uma interface amigável através do Discord. A arquitetura é robusta e bem organizada, com foco em performance e confiabilidade.
+## ⚠️ Limitações e TODO
 
-
-### TODO
-- [✅] Implementar função que registra mortes por monstros e envia para o canal de log de mortes por monstros
-- [✅] Implementar função que registra troca de classe dos personagens registrados e envia para o canal de log de trocas de classe
-- [✅] Criar função de war. Esta função deve aceitar o prazo no formato (quantidade)(formato). Exemplo: 1d (1 dia), 1w (1 semana), 1m (1 mês), 1y (1 ano).
-  - [✅] Quando a função war for invocada passando o parametro, deve-se criar uma espécie de listagem de frag (KDA) dos personagens aliados.  
-- [ ] Implementar função para importar lista de jogadores
+- [ ] **Importação de lista de jogadores:** Ainda não há comando ou função utilitária para importar uma lista de jogadores via comando Discord. Atualmente, a importação em lote só é possível via scripts ou manipulação direta do arquivo `data.json` (ex: `src/scripts/setupExecutableDatabase.ts`).
+- [✅] Registro de mortes por monstros e envio para canal específico
+- [✅] Registro de troca de classe e envio para canal específico
+- [✅] Função de guerra com análise de período customizável e ranking de aliados

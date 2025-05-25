@@ -1,0 +1,22 @@
+{
+  "robots": [
+    {
+      "id": 1,
+      "status": "stopped",
+      "queueFile": "queue1.json",
+      "lastRunTime": 1745967513968
+    },
+    {
+      "id": 2,
+      "status": "stopped",
+      "queueFile": "queue2.json",
+      "lastRunTime": 1744986104570
+    },
+    {
+      "id": 3,
+      "status": "stopped",
+      "queueFile": "queue3.json",
+      "lastRunTime": null
+    }
+  ]
+}
