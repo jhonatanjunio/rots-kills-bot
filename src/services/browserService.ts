@@ -3,6 +3,7 @@ import config from '../config';
 import fetch from 'node-fetch';
 import { CookieManager } from './cookieManager';
 import { ChromeService } from './chromeService';
+import { RateLimitStateService } from './rateLimitState';
 
 export interface PlayerDataResponse {
   error: boolean;
@@ -209,7 +210,19 @@ export class BrowserService {
   }
 
   public static async getPuppeteerPlayerData(playerId: number): Promise<PlayerDataResponse> {
+    const rateLimitState = RateLimitStateService.getInstance();
+    
     try {
+      // Verifica se pode processar antes de iniciar
+      const processCheck = rateLimitState.canProcess();
+      if (!processCheck.allowed) {
+        return { 
+          error: true, 
+          message: `Processamento pausado: ${processCheck.reason}`, 
+          method: 'browser' 
+        };
+      }
+
       const browser = await this.initialize();
       if (!browser) {
         return { error: true, message: 'Falha ao inicializar o navegador', method: 'browser' };
@@ -219,7 +232,7 @@ export class BrowserService {
       try {
         page = await browser.newPage();
       } catch (error) {
-        logtail.error(`Erro ao criar nova página: ${error}`);
+        logtail.debug(`Erro ao criar nova página: ${error}`);
         // Tenta reiniciar o browser
         await this.browser.close();
         this.browser = await ChromeService.launchBrowser();
@@ -251,45 +264,60 @@ export class BrowserService {
       page.on('response', async (response: any) => {
         if (response.url().includes('/profile/')) {
           try {
+            const status = response.status();
+            
+            // Detecta erros específicos pelo código de status
+            if (status === 429) {
+              responseData = { error: true, message: 'Erro 429: Too Many Requests', method: 'browser' };
+              return;
+            }
+            if (status === 403) {
+              responseData = { error: true, message: 'Erro 403: Forbidden - possível bloqueio', method: 'browser' };
+              return;
+            }
+            if (status !== 200) {
+              responseData = { error: true, message: `Erro HTTP ${status}`, method: 'browser' };
+              return;
+            }
+
             const responseText = await response.text();
             if (responseText.includes('<!DOCTYPE html>') || responseText.includes('<html>')) {
-              // É uma resposta HTML, provavelmente um erro ou página de bloqueio
-              logtail.warn(`Resposta HTML recebida - possível bloqueio de Cloudflare`);
-              responseData = { error: true, message: 'Erro: Resposta HTML recebida em vez de JSON', method: 'browser' };
+              // É uma resposta HTML, provavelmente Cloudflare ou erro
+              responseData = { error: true, message: 'Erro 403: Resposta HTML - possível bloqueio de Cloudflare', method: 'browser' };
               return;
             }
             
             const data = JSON.parse(responseText);
             responseData = { error: false, data, method: 'browser' };
           } catch (e) {
-            logtail.error(`Erro ao parsear resposta: ${e}`);
+            logtail.debug(`Erro ao parsear resposta: ${e}`);
             responseData = { error: true, message: 'Erro ao parsear resposta da API', method: 'browser' };
           }
         }
       });
 
       // Aumenta o timeout para dar mais tempo para carregar
-      logtail.info(`Navegando para perfil do jogador ${playerId}`);
+      logtail.debug(`Navegando para perfil do jogador ${playerId}`);
       await page.goto(`${this.API_URL}/profile/${playerId}?server=${this.SERVER}`, {
         waitUntil: 'networkidle2',
         timeout: this.PUPPETEER_TIMEOUT
       });
 
       let attempts = 0;
-      const maxAttempts = 30; // Aumenta o número de tentativas
-      const attemptDelay = 1000; // ms entre checagens 
+      const maxAttempts = 30;
+      const attemptDelay = 1000;
       
       while (!responseData && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, attemptDelay));
         attempts++;
         
-        if (attempts % 10 === 0) {
-          logtail.info(`Aguardando resposta da API... Tentativa ${attempts}/${maxAttempts}`);
+        if (attempts % 15 === 0) {
+          logtail.debug(`Aguardando resposta da API... Tentativa ${attempts}/${maxAttempts}`);
         }
       }
 
       this.browserLastUsed = Date.now();
-      await page.close().catch((error: Error) => logtail.error(`Erro ao fechar página: ${error}`));
+      await page.close().catch((error: Error) => logtail.debug(`Erro ao fechar página: ${error}`));
 
       if (!responseData) {
         return { error: true, message: 'Timeout ao aguardar dados do jogador', method: 'browser' };
@@ -297,20 +325,40 @@ export class BrowserService {
 
       return responseData;
     } catch (error) {
-      logtail.error(`Erro ao buscar dados via browser: ${error}`);
+      const errorMessage = String(error);
+      logtail.debug(`Erro ao buscar dados via browser: ${errorMessage}`);
       
-      // Tenta reiniciar o browser em caso de erro
-      try {
-        if (this.browser) {
-          await this.browser.close().catch(() => {});
-        }
-        this.browser = await ChromeService.launchBrowser();
-        logtail.info('Browser reiniciado após erro');
-      } catch (e) {
-        logtail.error(`Erro ao reiniciar browser: ${e}`);
+      // Determina o tipo de erro para melhor tratamento
+      let errorType = 'other';
+      if (errorMessage.toLowerCase().includes('timeout')) {
+        errorType = 'timeout';
+      } else if (errorMessage.toLowerCase().includes('403') || errorMessage.toLowerCase().includes('forbidden')) {
+        errorType = '403';
+      } else if (errorMessage.toLowerCase().includes('429')) {
+        errorType = '429';
       }
       
-      return { error: true, message: `Erro ao buscar dados: ${error}`, method: 'browser' };
+      // Tenta reiniciar o browser apenas para erros específicos
+      if (errorType === 'other' || errorType === 'timeout') {
+        try {
+          if (this.browser) {
+            await this.browser.close().catch(() => {});
+          }
+          this.browser = await ChromeService.launchBrowser();
+          logtail.debug('Browser reiniciado após erro');
+        } catch (e) {
+          logtail.error(`Erro ao reiniciar browser: ${e}`);
+        }
+      }
+      
+      return { 
+        error: true, 
+        message: errorType === '429' ? 'Erro 429: Too Many Requests' : 
+                errorType === '403' ? 'Erro 403: Forbidden' :
+                errorType === 'timeout' ? 'Timeout na requisição' :
+                `Erro ao buscar dados: ${errorMessage}`, 
+        method: 'browser' 
+      };
     }
   }
 }

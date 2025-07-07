@@ -5,10 +5,11 @@ import { removePlayer } from './removePlayer';
 import { showRanking } from './showRanking';
 import { war } from './war';
 import { shutdown } from './shutdown';
+import { systemStatus } from './systemStatus';
 
 
 // Tipo para os nomes dos comandos
-export type CommandName = 'addplayer' | 'playerstats' | 'removeplayer' | 'ranking' | 'war' | 'shutdown';
+export type CommandName = 'addplayer' | 'playerstats' | 'removeplayer' | 'ranking' | 'war' | 'shutdown' | 'systemstatus';
 
 // Tipo para as funções dos comandos
 type CommandFunction = (interaction: ChatInputCommandInteraction) => Promise<void>;
@@ -88,7 +89,11 @@ export const commandsData = [
 
   new SlashCommandBuilder()
     .setName('shutdown')
-    .setDescription('Desliga o bot')
+    .setDescription('Desliga o bot'),
+
+  new SlashCommandBuilder()
+    .setName('systemstatus')
+    .setDescription('Mostra o status detalhado do sistema de monitoramento')
 ] as const;
 
 // Mapeamento dos comandos para suas funções executoras
@@ -98,7 +103,8 @@ export const commands: Record<CommandName, CommandFunction> = {
   removeplayer: removePlayer,
   ranking: showRanking,
   war: war,
-  shutdown: shutdown
+  shutdown: shutdown,
+  systemstatus: systemStatus
 };
 
 // Função para registrar os comandos no Discord

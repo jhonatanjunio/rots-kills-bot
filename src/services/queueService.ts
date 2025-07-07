@@ -5,6 +5,7 @@ import { Database } from './database';
 import { BrowserService } from './browserService';
 import { logtail } from '../utils/logtail';
 import { randomInt } from 'crypto';
+import { RateLimitStateService } from './rateLimitState';
 
 interface QueuePlayer {
   id: number;
@@ -25,21 +26,21 @@ export class QueueService {
   private static instance: QueueService;
   private static readonly QUEUE_PATH = path.join(process.cwd(), 'database');
   private static readonly ROBOTS_PATH = path.join(process.cwd(), 'database', 'robots.json');
-  private static readonly MAX_ERROR_COUNT = 3;
-  private static readonly MIN_DELAY = 30000; // 30 segundos
-  private static readonly MAX_DELAY = 60000; // 60 segundos
+  private static readonly MAX_ERROR_COUNT = 5; // Aumentado para ser mais tolerante
+  private static readonly MIN_DELAY = 45000; // Aumentado para 45 segundos
+  private static readonly MAX_DELAY = 90000; // Aumentado para 90 segundos
   private static readonly MAX_CONCURRENT_BROWSERS = 3;
-  private static readonly GLOBAL_COOLDOWN = 60000; // 1 minuto de cooldown global entre requisições
   
   private robots: RobotInfo[] = [];
   private browserInstances: Map<number, any> = new Map();
   private isInitialized = false;
   private robotIntervals: Map<number, NodeJS.Timeout> = new Map();
-  private lastRequestTime: number = 0;
-  private globalCooldown: number = QueueService.GLOBAL_COOLDOWN;
+  private rateLimitState: RateLimitStateService;
+  private optimizationInterval: NodeJS.Timeout | null = null;
 
   private constructor() {
     // Construtor privado para Singleton
+    this.rateLimitState = RateLimitStateService.getInstance();
   }
 
   static getInstance(): QueueService {
@@ -53,11 +54,19 @@ export class QueueService {
     if (this.isInitialized) return;
     
     try {
+      // Carrega o estado de rate limiting primeiro
+      await this.rateLimitState.load();
+      
       await this.ensureQueueFiles();
       await this.loadRobots();
       await this.distributePlayers();
       this.isInitialized = true;
-      logtail.info(`Serviço de fila inicializado com ${this.robots.length} robôs`);
+      
+      // Inicia otimização automática a cada 30 minutos
+      this.startCooldownOptimization();
+      
+      const stats = this.rateLimitState.getStats();
+      logtail.info(`Serviço de fila inicializado com ${this.robots.length} robôs. Cooldown atual: ${stats.globalCooldown}s`);
     } catch (error) {
       logtail.error(`Erro ao inicializar serviço de fila: ${error}`);
       throw error;
@@ -280,6 +289,12 @@ export class QueueService {
     try {
       logtail.info('Parando todos os robôs...');
       
+      // Para o intervalo de otimização
+      if (this.optimizationInterval) {
+        clearInterval(this.optimizationInterval);
+        this.optimizationInterval = null;
+      }
+      
       for (const robot of this.robots) {
         if (robot.status === 'running') {
           await this.stopRobot(robot.id);
@@ -303,24 +318,31 @@ export class QueueService {
     }
   }
 
-  // Novo método para aguardar o cooldown global
-  private async waitForGlobalCooldown(): Promise<void> {
-    const now = Date.now();
-    const timeSinceLastRequest = now - this.lastRequestTime;
+  // Método para aguardar com base no estado de rate limiting
+  private async waitForCooldown(): Promise<void> {
+    const processCheck = this.rateLimitState.canProcess();
     
-    if (timeSinceLastRequest < this.globalCooldown) {
-      const waitTime = this.globalCooldown - timeSinceLastRequest;
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+    if (!processCheck.allowed) {
+      logtail.info(`⏸️ Processamento pausado: ${processCheck.reason}. Aguardando ${Math.round((processCheck.waitTime || 0)/1000)}s`);
+      await new Promise(resolve => setTimeout(resolve, processCheck.waitTime || 0));
+      return;
     }
-    
-    this.lastRequestTime = Date.now();
+
+    const cooldown = this.rateLimitState.getCurrentCooldown();
+    logtail.debug(`⏳ Aplicando cooldown de ${Math.round(cooldown/1000)}s`);
+    await new Promise(resolve => setTimeout(resolve, cooldown));
   }
 
-  // Método para aumentar o cooldown global após erros
-  private increaseGlobalCooldown(): void {
-    // Aumenta o cooldown em 50% a cada erro, até um máximo de 5 minutos
-    this.globalCooldown = Math.min(300000, this.globalCooldown * 1.5);
-    logtail.warn(`Cooldown global aumentado para ${Math.round(this.globalCooldown/1000)}s`);
+  // Inicia otimização automática do cooldown
+  private startCooldownOptimization(): void {
+    // Otimiza a cada 30 minutos
+    this.optimizationInterval = setInterval(async () => {
+      try {
+        await this.rateLimitState.optimizeCooldown();
+      } catch (error) {
+        logtail.error(`Erro durante otimização automática do cooldown: ${error}`);
+      }
+    }, 30 * 60 * 1000); // 30 minutos
   }
 
   private async processQueue(robotId: number): Promise<void> {
@@ -358,8 +380,8 @@ export class QueueService {
       
       logtail.info(`Robô ${robotId}: Iniciando processamento do jogador ${pendingPlayer.name} (ID: ${pendingPlayer.id})`);
       
-      // Aguarda o cooldown global antes de processar
-      await this.waitForGlobalCooldown();
+      // Aguarda o cooldown baseado no estado de rate limiting
+      await this.waitForCooldown();
       
       // Atualiza o jogador para status 'processing'
       const updatedQueue: QueuePlayer[] = queue.map(p => {
@@ -385,8 +407,19 @@ export class QueueService {
       const response = await BrowserService.getPuppeteerPlayerData(pendingPlayer.id);
       
       if (response.error || !response.data) {
-        logtail.warn(`Robô ${robotId}: Erro ao buscar dados do jogador ${pendingPlayer.name}: ${response.message}`);
-        this.increaseGlobalCooldown();
+        // Registra o erro no sistema de rate limiting
+        const errorType = this.determineErrorType(response.message || '');
+        await this.rateLimitState.recordError(errorType, {
+          playerId: pendingPlayer.id,
+          robotId: robotId
+        });
+        
+        // Log mais discreto para não poluir o console
+        if (errorType === '429') {
+          logtail.debug(`Robô ${robotId}: Rate limit para jogador ${pendingPlayer.name}`);
+        } else {
+          logtail.warn(`Robô ${robotId}: Erro ${errorType} para jogador ${pendingPlayer.name}: ${response.message}`);
+        }
         
         const errorQueue: QueuePlayer[] = queue.map(p => {
           if (p.id === pendingPlayer.id) {
@@ -402,12 +435,18 @@ export class QueueService {
         });
         
         const updatedPlayer = errorQueue.find(p => p.id === pendingPlayer.id);
-        if (updatedPlayer) {
-          logtail.info(`Robô ${robotId}: Jogador ${pendingPlayer.name} - Erro ${updatedPlayer.errorCount}/${QueueService.MAX_ERROR_COUNT}`);
+        if (updatedPlayer && updatedPlayer.status === 'erroed') {
+          logtail.warn(`Robô ${robotId}: Jogador ${pendingPlayer.name} marcado como erro após ${updatedPlayer.errorCount} tentativas`);
         }
         
         await this.saveQueue(robot.queueFile, errorQueue);
       } else {
+        // Registra o sucesso no sistema de rate limiting
+        await this.rateLimitState.recordSuccess({
+          playerId: pendingPlayer.id,
+          robotId: robotId
+        });
+        
         logtail.info(`Robô ${robotId}: Dados do jogador ${pendingPlayer.name} obtidos com sucesso`);
         
         // Sucesso: atualiza o banco de dados e marca como concluído
@@ -423,7 +462,7 @@ export class QueueService {
         
         // Atualiza o jogador no banco de dados
         await Database.updatePlayer(player);
-        logtail.info(`Robô ${robotId}: Dados do jogador ${player.name} atualizados no banco`);
+        logtail.debug(`Robô ${robotId}: Dados do jogador ${player.name} atualizados no banco`);
         
         // Processa mortes se houver
         if (playerData.deaths && playerData.deaths.deaths?.length > 0) {
@@ -445,10 +484,7 @@ export class QueueService {
         });
         
         await this.saveQueue(robot.queueFile, successQueue);
-        logtail.info(`Robô ${robotId}: Processamento do jogador ${pendingPlayer.name} concluído com sucesso`);
-        
-        // Reduz gradualmente o cooldown quando há sucesso
-        this.globalCooldown = Math.max(QueueService.GLOBAL_COOLDOWN, this.globalCooldown * 0.9);
+        logtail.debug(`Robô ${robotId}: Processamento do jogador ${pendingPlayer.name} concluído`);
       }
       
       // Atualiza o tempo da última execução
@@ -463,10 +499,28 @@ export class QueueService {
     } catch (error) {
       logtail.error(`Erro durante processamento da fila do robô ${robotId}: ${error}`);
       
-      // Em caso de erro não tratado, aumenta o cooldown drasticamente
-      this.globalCooldown = Math.min(600000, this.globalCooldown * 2);
-      logtail.warn(`Erro crítico - Cooldown global aumentado para ${Math.round(this.globalCooldown/1000)}s`);
+      // Registra erro crítico no sistema de rate limiting
+      await this.rateLimitState.recordError('other', {
+        robotId: robotId
+      });
     }
+  }
+
+  // Determina o tipo de erro baseado na mensagem
+  private determineErrorType(message: string): '429' | '403' | 'timeout' | 'other' {
+    const lowerMessage = message.toLowerCase();
+    
+    if (lowerMessage.includes('429') || lowerMessage.includes('too many requests')) {
+      return '429';
+    }
+    if (lowerMessage.includes('403') || lowerMessage.includes('forbidden')) {
+      return '403';
+    }
+    if (lowerMessage.includes('timeout') || lowerMessage.includes('timed out')) {
+      return 'timeout';
+    }
+    
+    return 'other';
   }
   
   private async processDeaths(player: Player, deaths: any[]): Promise<void> {
@@ -543,10 +597,8 @@ export class QueueService {
       };
     }
     
-    stats.cooldown = {
-      global_cooldown_seconds: Math.round(this.globalCooldown / 1000),
-      last_request: this.lastRequestTime ? new Date(this.lastRequestTime).toISOString() : null
-    };
+    // Adiciona estatísticas do sistema de rate limiting
+    stats.rateLimiting = this.rateLimitState.getStats();
     
     return stats;
   }

@@ -7,6 +7,7 @@ import { HealthMonitor } from './services/healthMonitor';
 import { hasManagerRole, isAllowedUser } from './utils/permissions';
 import { ShutdownManager } from './services/shutdownManager';
 import { logtail } from './utils/logtail';
+import { SmartLogger } from './utils/smartLogger';
 import { QueueService } from './services/queueService';
 require('dotenv').config();
 
@@ -30,7 +31,8 @@ const client = new Client({
 });
 
 client.once('ready', async () => {
-  console.log('Bot online!');
+  SmartLogger.system('Bot Discord conectado e inicializando serviços...');
+  
   await Database.ensureDatabaseFiles();
   await Database.load();
   await registerCommands(client);
@@ -45,6 +47,8 @@ client.once('ready', async () => {
   const healthMonitor = HealthMonitor.initialize(deathMonitor);
   await deathMonitor.start();
   healthMonitor.start();
+  
+  SmartLogger.system('Todos os serviços inicializados com sucesso! Bot pronto para uso.');
 });
 
 client.on('interactionCreate', async (interaction: Interaction) => {
